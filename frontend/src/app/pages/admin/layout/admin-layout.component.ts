@@ -14,6 +14,7 @@ import { AuthService } from '../../../core/services/auth.service';
       <aside class="w-64 border-r border-white/5 bg-[#090e1a]/80 backdrop-blur-md flex flex-col shrink-0">
         <div class="p-6 border-b border-white/5">
           <a routerLink="/" class="flex items-center space-x-2 text-xl font-bold tracking-tight">
+            <img src="assets/images/logo.png" alt="Intervexa AI Logo" class="w-7 h-7 object-contain rounded-md" />
             <span class="text-gradient-primary">Intervexa AI</span>
             <span class="text-[9px] bg-primary/20 text-primary border border-primary/30 px-2 py-0.5 rounded-full uppercase tracking-wider">Admin</span>
           </a>

@@ -23,7 +23,8 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
         class="sticky top-0 z-50 w-full border-b border-transparent py-4 px-6 md:px-12 flex items-center justify-between bg-white/80 backdrop-blur-md"
       >
         <!-- Logo -->
-        <a routerLink="/" class="flex items-center space-x-2 text-2xl font-bold tracking-tight text-[#111827] hover:opacity-90">
+        <a routerLink="/" class="flex items-center space-x-2.5 text-2xl font-bold tracking-tight text-[#111827] hover:opacity-90">
+          <img src="assets/images/logo.png" alt="Intervexa AI Logo" class="w-8 h-8 object-contain rounded-md" />
           <span class="text-gradient-primary">Intervexa AI</span>
         </a>
 
