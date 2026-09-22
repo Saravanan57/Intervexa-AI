@@ -8,7 +8,7 @@ export const jwtInterceptor: HttpInterceptorFn = (req, next) => {
   const token = authService.getAccessToken();
 
   // Clone and add header if token exists and targeting backend API endpoints
-  const isApiUrl = req.url.includes('/api') || req.url.startsWith(environment.apiUrl) || req.url.startsWith('http://localhost:5000') || req.url.startsWith('http://127.0.0.1:5000');
+  const isApiUrl = req.url.includes('/api') || req.url.startsWith(environment.apiUrl);
   if (token && isApiUrl) {
     req = req.clone({
       setHeaders: {
