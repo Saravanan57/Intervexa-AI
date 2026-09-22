@@ -30,7 +30,15 @@ const mockRedisClient = {
 };
 
 const initRedis = async () => {
-  const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+  const redisUrl = process.env.REDIS_URL;
+
+  if (!redisUrl) {
+    console.log('No REDIS_URL environment variable set. Using in-memory caching system.');
+    redisClient = mockRedisClient;
+    isRedisConnected = false;
+    return;
+  }
+
   redisClient = redis.createClient({
     url: redisUrl,
     socket: {
@@ -39,7 +47,7 @@ const initRedis = async () => {
   });
 
   redisClient.on('error', (err) => {
-    console.error('Redis client error, falling back to local memory cache:', err.message);
+    console.warn('Redis client error, falling back to local memory cache:', err.message);
     redisClient = mockRedisClient;
     isRedisConnected = false;
   });

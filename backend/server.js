@@ -29,14 +29,16 @@ const app = express();
 const server = http.createServer(app);
 
 // Configure CORS domains
-const configuredOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:4200,http://127.0.0.1:4200').split(',').map(o => o.trim());
+const rawOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:4200,http://127.0.0.1:4200').split(',').map(o => o.trim());
 if (process.env.FRONTEND_URL) {
-  configuredOrigins.push(process.env.FRONTEND_URL.trim());
+  rawOrigins.push(process.env.FRONTEND_URL.trim());
 }
+const configuredOrigins = rawOrigins.map(o => o.replace(/\/$/, ''));
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || configuredOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+    const cleanOrigin = origin ? origin.replace(/\/$/, '') : origin;
+    if (!cleanOrigin || configuredOrigins.includes(cleanOrigin) || process.env.NODE_ENV !== 'production') {
       callback(null, true);
     } else {
       callback(new Error('CORS policy violation'));
