@@ -246,7 +246,7 @@ export class MainLayoutComponent implements OnInit {
     this.router.events.pipe(
       filter(e => e instanceof NavigationEnd)
     ).subscribe(() => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo(0, 0);
     });
 
     if (this.authService.isAuthenticated()) {
@@ -262,7 +262,10 @@ export class MainLayoutComponent implements OnInit {
 
   @HostListener('window:scroll', [])
   onWindowScroll() {
-    this.isScrolled.set(window.scrollY > 20);
+    const scrolled = window.scrollY > 20;
+    if (this.isScrolled() !== scrolled) {
+      this.isScrolled.set(scrolled);
+    }
   }
 
   toggleMobileMenu() {

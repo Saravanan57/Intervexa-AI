@@ -1,6 +1,12 @@
+jest.mock('../config/redis', () => ({
+  getClient: () => ({ get: async () => null, set: async () => 'OK' }),
+  isConnected: () => false
+}));
+
 const request = require('supertest');
 const express = require('express');
 const errorHandler = require('../middlewares/errorHandler');
+const { protect } = require('../middlewares/auth');
 
 // Create a small mock express app to avoid starting the full MongoDB database connections during simple unit tests
 const testApp = express();
@@ -18,6 +24,10 @@ testApp.get('/error', (req, res, next) => {
 
 testApp.use(errorHandler);
 
+const protectedApp = express();
+protectedApp.use(express.json());
+protectedApp.get('/api/protected', protect, (req, res) => res.json({ success: true }));
+
 describe('Backend System Unit Tests', () => {
   it('should respond with 200 Healthy for GET /health', async () => {
     const res = await request(testApp).get('/health');
@@ -34,16 +44,6 @@ describe('Backend System Unit Tests', () => {
   });
 
   it('should return 401 Unauthorized when accessing protected routes without Bearer token', async () => {
-    jest.mock('../config/redis', () => ({
-      getClient: () => ({ get: async () => null }),
-      isConnected: () => false
-    }));
-
-    const { protect } = require('../middlewares/auth');
-    const protectedApp = express();
-    protectedApp.use(express.json());
-    protectedApp.get('/api/protected', protect, (req, res) => res.json({ success: true }));
-
     const res = await request(protectedApp).get('/api/protected');
     expect(res.statusCode).toEqual(401);
     expect(res.body.success).toBe(false);

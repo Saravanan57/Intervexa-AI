@@ -211,7 +211,8 @@ exports.verifyEmail = async (req, res, next) => {
 exports.forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
-    const user = await User.findOne({ email });
+    const cleanEmail = email ? String(email).toLowerCase().trim() : '';
+    const user = await User.findOne({ email: cleanEmail });
     
     if (!user) {
       // For security, don't reveal user doesn't exist
@@ -223,9 +224,10 @@ exports.forgotPassword = async (req, res, next) => {
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
-    const resetUrl = `${req.protocol}://${req.get('host')}/api/auth/reset-password?token=${resetToken}`;
+    const frontendBaseUrl = process.env.FRONTEND_URL || req.headers.origin || `${req.protocol}://${req.get('host')}`;
+    const resetUrl = `${frontendBaseUrl.replace(/\/$/, '')}/auth/reset-password?token=${resetToken}`;
     await sendEmail({
-      to: email,
+      to: user.email,
       subject: 'Intervexa AI - Password Reset request',
       text: `Reset your password here: ${resetUrl}`,
       html: `
