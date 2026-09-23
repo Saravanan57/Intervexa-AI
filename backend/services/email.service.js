@@ -135,17 +135,22 @@ const getTransporter = (forceRefresh = false) => {
   return cachedTransporter;
 };
 
+let lastVerificationResult = null;
+let lastSendResult = null;
+
 /**
  * Verifies active transporter connection without exposing credentials
  */
 const verifyTransporterConnection = async () => {
   if (!isSmtpConfigured()) {
-    return { configured: false, connected: false, message: 'SMTP credentials not configured' };
+    lastVerificationResult = { configured: false, connected: false, message: 'SMTP credentials not configured', timestamp: new Date().toISOString() };
+    return lastVerificationResult;
   }
   try {
     const transporter = getTransporter();
     await transporter.verify();
-    return { configured: true, connected: true, message: 'SMTP connection verified successfully' };
+    lastVerificationResult = { configured: true, connected: true, message: 'SMTP connection verified successfully', timestamp: new Date().toISOString() };
+    return lastVerificationResult;
   } catch (err) {
     resetTransporterCache();
     const safeError = {
@@ -156,7 +161,15 @@ const verifyTransporterConnection = async () => {
       message: err.message
     };
     console.error('[SMTP DIAGNOSTIC ERROR] Transporter verification failed:', safeError);
-    return { configured: true, connected: false, message: err.message, code: err.code };
+    lastVerificationResult = {
+      configured: true,
+      connected: false,
+      message: err.message,
+      code: err.code,
+      responseCode: err.responseCode,
+      timestamp: new Date().toISOString()
+    };
+    return lastVerificationResult;
   }
 };
 
@@ -199,7 +212,9 @@ const getSafeStatus = () => {
     hasHost: !!rawHost,
     hostContainsEmail: rawHost.includes('@'),
     hasPort: !!process.env.SMTP_PORT,
-    fromAddress: getFromAddress()
+    fromAddress: getFromAddress(),
+    lastVerification: lastVerificationResult,
+    lastSendResult: lastSendResult
   };
 };
 
@@ -238,6 +253,7 @@ const sendEmail = async ({ to, subject, html, text }) => {
 
     const info = await transporter.sendMail(mailOptions);
     console.log(`[SMTP SUCCESS] Email delivered to ${to} (Message ID: ${info.messageId})`);
+    lastSendResult = { success: true, to, timestamp: new Date().toISOString() };
     return {
       success: true,
       messageId: info.messageId
@@ -256,6 +272,7 @@ const sendEmail = async ({ to, subject, html, text }) => {
         // Cache the successful fallback transporter
         cachedTransporter = fallbackTransporter;
         console.log(`[SMTP SUCCESS] Email delivered via alternate Gmail configuration to ${to} (Message ID: ${info.messageId})`);
+        lastSendResult = { success: true, to, fallbackUsed: true, timestamp: new Date().toISOString() };
         return {
           success: true,
           messageId: info.messageId
@@ -284,6 +301,15 @@ const sendEmail = async ({ to, subject, html, text }) => {
 
     console.error('[SMTP ERROR] Nodemailer failed to send email:', safeDiagnostic);
     logger.error('Nodemailer failed to send email to %s: %s (code: %s)', to, primaryErr.message, primaryErr.code || 'UNKNOWN');
+
+    lastSendResult = {
+      success: false,
+      to,
+      code: primaryErr.code,
+      responseCode: primaryErr.responseCode,
+      message: primaryErr.message,
+      timestamp: new Date().toISOString()
+    };
 
     return {
       success: false,
