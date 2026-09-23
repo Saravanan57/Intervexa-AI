@@ -227,19 +227,35 @@ exports.forgotPassword = async (req, res, next) => {
 
     const frontendBaseUrl = process.env.FRONTEND_URL || req.headers.origin || 'https://intervexa-ai-sooty.vercel.app';
     const resetUrl = `${frontendBaseUrl.replace(/\/$/, '')}/auth/reset-password?token=${resetToken}`;
-    await sendEmail({
+    const emailResult = await sendEmail({
       to: user.email,
       subject: 'Intervexa AI - Password Reset request',
       text: `Reset your password here: ${resetUrl}`,
       html: `
-        <div style="font-family: sans-serif; padding: 20px; color: #333;">
-          <h2>Password Reset Request</h2>
-          <p>We received a request to reset your password. Click the link below to verify and update your credentials:</p>
-          <a href="${resetUrl}" style="background-color: #7C3AED; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 15px;">Reset Password</a>
-          <p style="margin-top: 25px; font-size: 12px; color: #888;">This link will expire in 1 hour. If you did not request this, you can ignore this email.</p>
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <h1 style="color: #0145F2; margin: 0; font-size: 24px; font-weight: 800;">Intervexa AI</h1>
+            <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Master Every Interview with AI</p>
+          </div>
+          <h2 style="color: #1e293b; font-size: 18px; font-weight: 700;">Password Reset Request</h2>
+          <p style="color: #475569; font-size: 14px; line-height: 1.6;">We received a request to reset your password for your Intervexa AI account. Click the button below to choose a new password:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${resetUrl}" style="background-color: #0145F2; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">Reset Password</a>
+          </div>
+          <p style="color: #64748b; font-size: 13px; line-height: 1.5;">Or copy and paste this URL into your browser:<br/><a href="${resetUrl}" style="color: #0145F2; word-break: break-all;">${resetUrl}</a></p>
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+          <p style="color: #94a3b8; font-size: 12px; margin: 0;">This reset link will expire in 1 hour. If you did not request a password reset, you can safely ignore this email.</p>
         </div>
       `
     });
+
+    if (!emailResult || !emailResult.success) {
+      logger.error('Failed to dispatch password reset email to %s: %s', user.email, emailResult?.error || 'Unknown error');
+      return res.status(503).json({
+        success: false,
+        message: 'Unable to send password reset email at this time. Please try again later or contact support.'
+      });
+    }
 
     res.status(200).json({ success: true, message: 'Password reset link sent.' });
   } catch (err) {

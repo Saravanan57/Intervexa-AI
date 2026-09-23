@@ -42,7 +42,7 @@ import { AuthService } from '../../../core/services/auth.service';
             <input 
               type="email" 
               formControlName="email"
-              placeholder="name@company.com" 
+              placeholder="example@gmail.com" 
               class="w-full bg-white border border-[#D9E2F1] rounded-xl px-4 py-3 text-sm text-[#111827] focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/5 transition-all"
             />
             @if (forgotForm.get('email')?.touched && forgotForm.get('email')?.invalid) {

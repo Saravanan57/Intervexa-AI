@@ -79,7 +79,7 @@ import { AuthService } from '../../services/auth.service';
                   <input 
                     type="email" 
                     formControlName="email" 
-                    placeholder="name@company.com" 
+                    placeholder="example@gmail.com" 
                     class="w-full bg-white border border-[#D9E2F1] rounded-xl px-3.5 py-2.5 text-xs text-[#111827] focus:outline-none focus:border-[#0145F2]"
                   />
                 </div>
@@ -141,7 +141,7 @@ import { AuthService } from '../../services/auth.service';
                   <input 
                     type="email" 
                     formControlName="email" 
-                    placeholder="name@company.com" 
+                    placeholder="example@gmail.com" 
                     class="w-full bg-white border border-[#D9E2F1] rounded-xl px-3.5 py-2.5 text-xs text-[#111827] focus:outline-none focus:border-[#0145F2]"
                   />
                 </div>

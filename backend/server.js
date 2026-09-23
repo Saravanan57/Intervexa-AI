@@ -110,7 +110,13 @@ app.use('/api/feedback', require('./routes/feedback.routes'));
 
 // Health check endpoints
 const healthCheckHandler = (req, res) => {
-  res.status(200).json({ success: true, status: 'Healthy', time: new Date() });
+  const { getSafeStatus } = require('./services/email.service');
+  res.status(200).json({ 
+    success: true, 
+    status: 'Healthy', 
+    time: new Date(),
+    emailService: getSafeStatus()
+  });
 };
 app.get('/health', healthCheckHandler);
 app.get('/api/health', healthCheckHandler);
