@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
 import { AuthModalService } from '../../services/auth-modal.service';
 import { AuthService } from '../../services/auth.service';
 
@@ -84,7 +85,16 @@ import { AuthService } from '../../services/auth.service';
                 </div>
 
                 <div class="space-y-1">
-                  <label class="text-xs font-bold text-[#4B5563]">Password</label>
+                  <div class="flex justify-between items-center">
+                    <label class="text-xs font-bold text-[#4B5563]">Password</label>
+                    <button 
+                      type="button" 
+                      (click)="goToForgotPassword()" 
+                      class="text-[11px] font-bold text-[#0145F2] hover:underline cursor-pointer bg-transparent border-0 p-0"
+                    >
+                      Forgot Password?
+                    </button>
+                  </div>
                   <input 
                     type="password" 
                     formControlName="password" 
@@ -105,6 +115,11 @@ import { AuthService } from '../../services/auth.service';
                     <span>Sign In & Continue</span>
                   }
                 </button>
+
+                <div class="text-center text-[11px] text-muted pt-2 border-t border-[#D9E2F1]/50 flex justify-between items-center">
+                  <span>Don't have an account? <button type="button" (click)="authModalService.setMode('register')" class="font-extrabold text-[#0145F2] hover:underline bg-transparent border-0 p-0 cursor-pointer">Create Account</button></span>
+                  <button type="button" (click)="goToLogin()" class="font-semibold text-muted hover:text-[#0145F2] hover:underline bg-transparent border-0 p-0 cursor-pointer">Full Page</button>
+                </div>
               </form>
             }
 
@@ -153,6 +168,11 @@ import { AuthService } from '../../services/auth.service';
                     <span>Create Account & Continue</span>
                   }
                 </button>
+
+                <div class="text-center text-[11px] text-muted pt-2 border-t border-[#D9E2F1]/50 flex justify-between items-center">
+                  <span>Already have an account? <button type="button" (click)="authModalService.setMode('login')" class="font-extrabold text-[#0145F2] hover:underline bg-transparent border-0 p-0 cursor-pointer">Sign In</button></span>
+                  <button type="button" (click)="goToRegister()" class="font-semibold text-muted hover:text-[#0145F2] hover:underline bg-transparent border-0 p-0 cursor-pointer">Full Page</button>
+                </div>
               </form>
             }
 
@@ -165,6 +185,7 @@ import { AuthService } from '../../services/auth.service';
 export class AuthModalComponent {
   authModalService = inject(AuthModalService);
   authService = inject(AuthService);
+  router = inject(Router);
   fb = inject(FormBuilder);
 
   isLoading = signal(false);
@@ -180,6 +201,21 @@ export class AuthModalComponent {
     email: ['', [Validators.required, Validators.email]],
     password: ['', [Validators.required, Validators.minLength(6)]]
   });
+
+  goToForgotPassword() {
+    this.authModalService.closeModal();
+    this.router.navigate(['/auth/forgot-password']);
+  }
+
+  goToLogin() {
+    this.authModalService.closeModal();
+    this.router.navigate(['/auth/login']);
+  }
+
+  goToRegister() {
+    this.authModalService.closeModal();
+    this.router.navigate(['/auth/register']);
+  }
 
   onLoginSubmit() {
     if (this.loginForm.invalid) return;

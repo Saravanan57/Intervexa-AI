@@ -34,6 +34,21 @@ export const routes: Routes = [
         pathMatch: 'full'
       },
       {
+        path: 'login',
+        redirectTo: 'auth/login',
+        pathMatch: 'full'
+      },
+      {
+        path: 'register',
+        redirectTo: 'auth/register',
+        pathMatch: 'full'
+      },
+      {
+        path: 'forgot-password',
+        redirectTo: 'auth/forgot-password',
+        pathMatch: 'full'
+      },
+      {
         path: 'dashboard',
         loadComponent: () => import('./pages/dashboard/dashboard.component').then(m => m.DashboardComponent),
         canActivate: [authGuard]
