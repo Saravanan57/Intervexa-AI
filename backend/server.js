@@ -163,6 +163,22 @@ const startServer = async () => {
 
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+
+      // Safe non-blocking SMTP transporter verification on startup
+      const { verifyTransporterConnection, isSmtpConfigured } = require('./services/email.service');
+      if (isSmtpConfigured()) {
+        verifyTransporterConnection().then((diag) => {
+          if (diag.connected) {
+            console.log('[SMTP DIAGNOSTIC] SMTP transporter verified successfully on server startup.');
+          } else {
+            console.warn(`[SMTP DIAGNOSTIC WARN] SMTP connection verification returned: ${diag.message}`);
+          }
+        }).catch((err) => {
+          console.warn(`[SMTP DIAGNOSTIC WARN] Startup verification error: ${err.message}`);
+        });
+      } else {
+        console.log('[SMTP DIAGNOSTIC] SMTP not configured with active credentials.');
+      }
     });
   } catch (err) {
     logger.error('App bootstrap failed: %s', err.message);

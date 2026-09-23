@@ -22,13 +22,18 @@ const logger = winston.createLogger({
   ],
 });
 
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      winston.format.simple()
-    ),
-  }));
-}
+// Always enable Console logging so log stream is visible in cloud environments (Render/Heroku/Docker)
+logger.add(new winston.transports.Console({
+  format: process.env.NODE_ENV === 'production'
+    ? winston.format.combine(
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        winston.format.splat(),
+        winston.format.simple()
+      )
+    : winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      ),
+}));
 
 module.exports = logger;

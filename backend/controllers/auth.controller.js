@@ -268,6 +268,7 @@ exports.forgotPassword = async (req, res, next) => {
     });
 
     if (!emailResult || !emailResult.success) {
+      console.error(`[AUTH ERROR] Failed to dispatch password reset email to ${user.email}: ${emailResult?.error || 'Unknown error'}`);
       logger.error('Failed to dispatch password reset email to %s: %s', user.email, emailResult?.error || 'Unknown error');
       return res.status(503).json({
         success: false,
@@ -275,6 +276,7 @@ exports.forgotPassword = async (req, res, next) => {
       });
     }
 
+    console.log(`[SMTP SUCCESS] Password reset email sent successfully to ${user.email}`);
     res.status(200).json({ success: true, message: 'Password reset link sent.' });
   } catch (err) {
     next(err);
