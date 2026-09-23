@@ -44,7 +44,22 @@ const UserSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: true
+    required: function() {
+      return !this.googleId && !this.facebookId && this.authProvider === 'local';
+    }
+  },
+  authProvider: {
+    type: String,
+    enum: ['local', 'google', 'facebook'],
+    default: 'local'
+  },
+  googleId: {
+    type: String,
+    default: ''
+  },
+  facebookId: {
+    type: String,
+    default: ''
   },
   role: {
     type: mongoose.Schema.Types.ObjectId,
@@ -129,5 +144,7 @@ const UserSchema = new mongoose.Schema({
 
 UserSchema.index({ status: 1, createdAt: -1 });
 UserSchema.index({ email: 1, status: 1 });
+UserSchema.index({ googleId: 1 }, { sparse: true });
+UserSchema.index({ facebookId: 1 }, { sparse: true });
 
 module.exports = mongoose.model('User', UserSchema);

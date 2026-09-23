@@ -43,7 +43,10 @@ const getTransporter = () => {
   if (isGmail && (!host || host === 'smtp.gmail.com')) {
     cachedTransporter = nodemailer.createTransport({
       service: 'gmail',
-      auth: { user, pass }
+      auth: { user, pass },
+      connectionTimeout: 8000,
+      greetingTimeout: 5000,
+      socketTimeout: 10000
     });
     console.log('[SMTP] Initialized Gmail Transporter.');
   } else {
@@ -55,6 +58,9 @@ const getTransporter = () => {
       port: port,
       secure: isSecure,
       auth: { user, pass },
+      connectionTimeout: 8000,
+      greetingTimeout: 5000,
+      socketTimeout: 10000,
       tls: {
         rejectUnauthorized: false
       }

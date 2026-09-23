@@ -26,6 +26,7 @@ require('./models/Settings');
 require('./models/ActivityLog');
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // Configure CORS domains
@@ -115,7 +116,11 @@ const healthCheckHandler = (req, res) => {
     success: true, 
     status: 'Healthy', 
     time: new Date(),
-    emailService: getSafeStatus()
+    emailService: getSafeStatus(),
+    oauthService: {
+      hasGoogleAuth: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+      hasFacebookAuth: !!(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET)
+    }
   });
 };
 app.get('/health', healthCheckHandler);

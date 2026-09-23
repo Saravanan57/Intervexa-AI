@@ -111,6 +111,14 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials. Please check your email address.' });
     }
 
+    if (!user.password) {
+      const providerName = user.authProvider === 'google' ? 'Google' : (user.authProvider === 'facebook' ? 'Facebook' : 'social login');
+      return res.status(400).json({
+        success: false,
+        message: `This account is registered with ${providerName}. Please use "Continue with ${providerName}" or use "Forgot Password" to set a password.`
+      });
+    }
+
     const isMatch = await bcrypt.compare(String(password).trim(), user.password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Invalid credentials. Please check your password.' });
@@ -357,6 +365,28 @@ exports.changePassword = async (req, res, next) => {
   }
 };
 
+exports.getMe = async (req, res, next) => {
+  try {
+    const user = req.user;
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role?.name || 'candidate',
+        profileImage: user.profileImage,
+        isVerified: user.isVerified,
+        skills: user.skills,
+        experience: user.experience,
+        authProvider: user.authProvider || 'local'
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.updateProfile = async (req, res, next) => {
   try {
     const { 
@@ -432,6 +462,395 @@ exports.updateProfile = async (req, res, next) => {
         preferredJobRole: user.preferredJobRole,
         preferredInterviewLanguage: user.preferredInterviewLanguage,
         achievements: user.achievements
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/* ==========================================================================
+   SOCIAL AUTHENTICATION & ACCOUNT LINKING (GOOGLE & FACEBOOK)
+   ========================================================================== */
+
+/**
+ * Reusable helper to find, link, or create a social candidate account
+ */
+const findOrCreateSocialUser = async ({ provider, providerId, email, name, picture, emailVerified }) => {
+  const cleanEmail = email ? String(email).toLowerCase().trim() : '';
+
+  // 1. Look up by social provider ID
+  let user = null;
+  if (provider === 'google') {
+    user = await User.findOne({ googleId: providerId }).populate('role');
+  } else if (provider === 'facebook') {
+    user = await User.findOne({ facebookId: providerId }).populate('role');
+  }
+
+  // 2. Safe account linking: Match existing user by verified email if not already linked
+  if (!user && cleanEmail) {
+    user = await User.findOne({ email: cleanEmail }).populate('role');
+    if (user) {
+      let updated = false;
+      if (provider === 'google' && !user.googleId) {
+        user.googleId = providerId;
+        updated = true;
+      } else if (provider === 'facebook' && !user.facebookId) {
+        user.facebookId = providerId;
+        updated = true;
+      }
+      if (!user.profileImage && picture) {
+        user.profileImage = picture;
+        updated = true;
+      }
+      if (!user.isVerified && emailVerified) {
+        user.isVerified = true;
+        updated = true;
+      }
+      if (updated) {
+        await user.save();
+      }
+    }
+  }
+
+  // 3. New candidate registration if no account exists
+  if (!user) {
+    if (!cleanEmail) {
+      throw new Error(`Your ${provider === 'google' ? 'Google' : 'Facebook'} account did not share a verified email address. Email is required for registration.`);
+    }
+
+    const candidateRole = await Role.findOne({ name: 'candidate' });
+    if (!candidateRole) {
+      throw new Error('Candidate role not configured in system');
+    }
+
+    user = await User.create({
+      name: name || (provider === 'google' ? 'Google Candidate' : 'Facebook Candidate'),
+      email: cleanEmail,
+      role: candidateRole._id,
+      authProvider: provider,
+      googleId: provider === 'google' ? providerId : '',
+      facebookId: provider === 'facebook' ? providerId : '',
+      profileImage: picture || '',
+      isVerified: Boolean(emailVerified),
+      status: 'active'
+    });
+
+    user = await User.findById(user._id).populate('role');
+  }
+
+  return user;
+};
+
+// ---------------- Google OAuth ----------------
+
+exports.googleOAuthRedirect = (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://intervexa-ai-sooty.vercel.app').replace(/\/$/, '');
+
+  if (!clientId) {
+    return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Google authentication is currently being configured on the server. Please sign in with email and password.')}`);
+  }
+
+  const backendBaseUrl = `${req.protocol}://${req.get('host')}`;
+  const redirectUri = `${backendBaseUrl}/api/auth/google/callback`;
+  const state = crypto.randomBytes(16).toString('hex');
+
+  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${encodeURIComponent(clientId)}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `response_type=code&` +
+    `scope=${encodeURIComponent('openid email profile')}&` +
+    `state=${state}&` +
+    `access_type=online&` +
+    `prompt=select_account`;
+
+  res.redirect(googleAuthUrl);
+};
+
+exports.googleOAuthCallback = async (req, res) => {
+  const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://intervexa-ai-sooty.vercel.app').replace(/\/$/, '');
+  const { code, error } = req.query;
+
+  if (error || !code) {
+    const errorMsg = error === 'access_denied' ? 'Google sign-in was cancelled.' : 'Unable to sign in with Google. Please try again.';
+    return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent(errorMsg)}`);
+  }
+
+  try {
+    const backendBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const redirectUri = `${backendBaseUrl}/api/auth/google/callback`;
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      })
+    });
+
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      logger.error('Google token exchange failed: %s', tokenData.error_description || tokenData.error || 'Unknown error');
+      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Unable to authenticate with Google. Please try again.')}`);
+    }
+
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` }
+    });
+
+    const profile = await profileRes.json();
+    if (!profileRes.ok || !profile.sub) {
+      logger.error('Failed to retrieve Google profile: %j', profile);
+      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Unable to retrieve your Google profile.')}`);
+    }
+
+    const user = await findOrCreateSocialUser({
+      provider: 'google',
+      providerId: profile.sub,
+      email: profile.email,
+      name: profile.name,
+      picture: profile.picture,
+      emailVerified: profile.email_verified
+    });
+
+    if (user.status !== 'active') {
+      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Your account is currently suspended.')}`);
+    }
+
+    const { accessToken, refreshToken } = generateTokens(user);
+
+    await ActivityLog.create({
+      user: user._id,
+      action: 'USER_LOGIN_GOOGLE',
+      ipAddress: req.ip || '',
+      details: 'Logged in via Google OAuth'
+    });
+
+    res.redirect(`${frontendBaseUrl}/auth/callback?token=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}`);
+  } catch (err) {
+    logger.error('Google OAuth callback error: %s', err.message);
+    res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('An error occurred during Google sign-in. Please try again.')}`);
+  }
+};
+
+exports.googleTokenLogin = async (req, res, next) => {
+  try {
+    const { token, idToken } = req.body;
+    const credential = token || idToken;
+
+    if (!credential) {
+      return res.status(400).json({ success: false, message: 'Google credential token is required' });
+    }
+
+    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+    const payload = await verifyRes.json();
+
+    if (!verifyRes.ok || !payload.sub) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired Google token' });
+    }
+
+    if (process.env.GOOGLE_CLIENT_ID && payload.aud !== process.env.GOOGLE_CLIENT_ID) {
+      return res.status(401).json({ success: false, message: 'Google token audience mismatch' });
+    }
+
+    const user = await findOrCreateSocialUser({
+      provider: 'google',
+      providerId: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      picture: payload.picture,
+      emailVerified: payload.email_verified === 'true' || payload.email_verified === true
+    });
+
+    if (user.status !== 'active') {
+      return res.status(403).json({ success: false, message: 'Your account is suspended' });
+    }
+
+    const { accessToken, refreshToken } = generateTokens(user);
+
+    await ActivityLog.create({
+      user: user._id,
+      action: 'USER_LOGIN_GOOGLE',
+      ipAddress: req.ip || '',
+      details: 'Logged in via Google Token'
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Google login successful',
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role.name,
+        profileImage: user.profileImage,
+        isVerified: user.isVerified,
+        skills: user.skills,
+        experience: user.experience
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ---------------- Facebook OAuth ----------------
+
+exports.facebookOAuthRedirect = (req, res) => {
+  const appId = process.env.FACEBOOK_APP_ID;
+  const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://intervexa-ai-sooty.vercel.app').replace(/\/$/, '');
+
+  if (!appId) {
+    return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Facebook authentication is currently being configured on the server. Please sign in with email and password.')}`);
+  }
+
+  const backendBaseUrl = `${req.protocol}://${req.get('host')}`;
+  const redirectUri = `${backendBaseUrl}/api/auth/facebook/callback`;
+  const state = crypto.randomBytes(16).toString('hex');
+
+  const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?` +
+    `client_id=${encodeURIComponent(appId)}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `state=${state}&` +
+    `scope=${encodeURIComponent('email,public_profile')}&` +
+    `response_type=code`;
+
+  res.redirect(fbAuthUrl);
+};
+
+exports.facebookOAuthCallback = async (req, res) => {
+  const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://intervexa-ai-sooty.vercel.app').replace(/\/$/, '');
+  const { code, error, error_reason } = req.query;
+
+  if (error || !code) {
+    const errorMsg = (error === 'access_denied' || error_reason === 'user_denied')
+      ? 'Facebook sign-in was cancelled.' 
+      : 'Unable to sign in with Facebook. Please try again.';
+    return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent(errorMsg)}`);
+  }
+
+  try {
+    const backendBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const redirectUri = `${backendBaseUrl}/api/auth/facebook/callback`;
+
+    const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?` +
+      `client_id=${encodeURIComponent(process.env.FACEBOOK_APP_ID)}&` +
+      `client_secret=${encodeURIComponent(process.env.FACEBOOK_APP_SECRET)}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+      `code=${encodeURIComponent(code)}`;
+
+    const tokenRes = await fetch(tokenUrl);
+    const tokenData = await tokenRes.json();
+
+    if (!tokenRes.ok || !tokenData.access_token) {
+      logger.error('Facebook token exchange failed: %j', tokenData);
+      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Unable to authenticate with Facebook. Please try again.')}`);
+    }
+
+    const profileUrl = `https://graph.facebook.com/me?fields=id,name,email,picture.type(large)&access_token=${encodeURIComponent(tokenData.access_token)}`;
+    const profileRes = await fetch(profileUrl);
+    const profile = await profileRes.json();
+
+    if (!profileRes.ok || !profile.id) {
+      logger.error('Failed to retrieve Facebook profile: %j', profile);
+      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Unable to retrieve your Facebook profile.')}`);
+    }
+
+    const picture = profile.picture?.data?.url || '';
+
+    const user = await findOrCreateSocialUser({
+      provider: 'facebook',
+      providerId: profile.id,
+      email: profile.email,
+      name: profile.name,
+      picture,
+      emailVerified: Boolean(profile.email)
+    });
+
+    if (user.status !== 'active') {
+      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Your account is currently suspended.')}`);
+    }
+
+    const { accessToken, refreshToken } = generateTokens(user);
+
+    await ActivityLog.create({
+      user: user._id,
+      action: 'USER_LOGIN_FACEBOOK',
+      ipAddress: req.ip || '',
+      details: 'Logged in via Facebook OAuth'
+    });
+
+    res.redirect(`${frontendBaseUrl}/auth/callback?token=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}`);
+  } catch (err) {
+    logger.error('Facebook OAuth callback error: %s', err.message);
+    res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('An error occurred during Facebook sign-in. Please try again.')}`);
+  }
+};
+
+exports.facebookTokenLogin = async (req, res, next) => {
+  try {
+    const { accessToken, userID } = req.body;
+    if (!accessToken) {
+      return res.status(400).json({ success: false, message: 'Facebook access token is required' });
+    }
+
+    const profileUrl = `https://graph.facebook.com/me?fields=id,name,email,picture.type(large)&access_token=${encodeURIComponent(accessToken)}`;
+    const profileRes = await fetch(profileUrl);
+    const profile = await profileRes.json();
+
+    if (!profileRes.ok || !profile.id) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired Facebook access token' });
+    }
+
+    if (userID && profile.id !== userID) {
+      return res.status(401).json({ success: false, message: 'Facebook user ID mismatch' });
+    }
+
+    const picture = profile.picture?.data?.url || '';
+
+    const user = await findOrCreateSocialUser({
+      provider: 'facebook',
+      providerId: profile.id,
+      email: profile.email,
+      name: profile.name,
+      picture,
+      emailVerified: Boolean(profile.email)
+    });
+
+    if (user.status !== 'active') {
+      return res.status(403).json({ success: false, message: 'Your account is suspended' });
+    }
+
+    const { accessToken: appAccessToken, refreshToken } = generateTokens(user);
+
+    await ActivityLog.create({
+      user: user._id,
+      action: 'USER_LOGIN_FACEBOOK',
+      ipAddress: req.ip || '',
+      details: 'Logged in via Facebook Token'
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Facebook login successful',
+      accessToken: appAccessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role.name,
+        profileImage: user.profileImage,
+        isVerified: user.isVerified,
+        skills: user.skills,
+        experience: user.experience
       }
     });
   } catch (err) {

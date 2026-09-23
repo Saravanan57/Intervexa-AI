@@ -41,20 +41,67 @@ export class AuthService {
     return localStorage.getItem('refreshToken');
   }
 
+  handleAuthSuccess(res: AuthResponse) {
+    if (res.accessToken) {
+      localStorage.setItem('accessToken', res.accessToken);
+      localStorage.setItem('refreshToken', res.refreshToken);
+      localStorage.setItem('user', JSON.stringify(res.user));
+      this.currentUser.set(res.user);
+    }
+  }
+
   register(userData: any): Observable<any> {
     return this.http.post(`${this.apiUrl}/register`, userData);
   }
 
   login(credentials: any): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.apiUrl}/login`, credentials).pipe(
+      tap((res) => this.handleAuthSuccess(res))
+    );
+  }
+
+  getMe(): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/me`).pipe(
       tap((res) => {
-        if (res.accessToken) {
-          localStorage.setItem('accessToken', res.accessToken);
-          localStorage.setItem('refreshToken', res.refreshToken);
+        if (res.success && res.user) {
           localStorage.setItem('user', JSON.stringify(res.user));
           this.currentUser.set(res.user);
         }
       })
+    );
+  }
+
+  handleSocialTokens(accessToken: string, refreshToken: string): Observable<any> {
+    localStorage.setItem('accessToken', accessToken);
+    localStorage.setItem('refreshToken', refreshToken);
+    return this.getMe();
+  }
+
+  getGoogleAuthUrl(): string {
+    return `${this.apiUrl}/google`;
+  }
+
+  getFacebookAuthUrl(): string {
+    return `${this.apiUrl}/facebook`;
+  }
+
+  loginWithGoogleRedirect() {
+    window.location.href = this.getGoogleAuthUrl();
+  }
+
+  loginWithFacebookRedirect() {
+    window.location.href = this.getFacebookAuthUrl();
+  }
+
+  googleTokenLogin(token: string): Observable<AuthResponse> {
+    return this.http.post<AuthResponse>(`${this.apiUrl}/google`, { token }).pipe(
+      tap((res) => this.handleAuthSuccess(res))
+    );
+  }
+
+  facebookTokenLogin(accessToken: string, userID?: string): Observable<AuthResponse> {
+    return this.http.post<AuthResponse>(`${this.apiUrl}/facebook`, { accessToken, userID }).pipe(
+      tap((res) => this.handleAuthSuccess(res))
     );
   }
 
