@@ -25,6 +25,15 @@ const generateTokens = (user) => {
   return { accessToken, refreshToken };
 };
 
+// Helper to reliably compute trimmed frontend URL with https:// prefix
+const getFrontendBaseUrl = (req) => {
+  let url = (process.env.FRONTEND_URL || req?.headers?.origin || 'https://intervexa-ai-sooty.vercel.app').trim();
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = `https://${url}`;
+  }
+  return url.replace(/\/+$/, '');
+};
+
 exports.register = async (req, res, next) => {
   try {
     const { name, email, password, phone, college, skills, experience } = req.body;
@@ -234,8 +243,8 @@ exports.forgotPassword = async (req, res, next) => {
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
-    const frontendBaseUrl = process.env.FRONTEND_URL || req.headers.origin || 'https://intervexa-ai-sooty.vercel.app';
-    const resetUrl = `${frontendBaseUrl.replace(/\/$/, '')}/auth/reset-password?token=${resetToken}`;
+    const frontendBaseUrl = getFrontendBaseUrl(req);
+    const resetUrl = `${frontendBaseUrl}/auth/reset-password?token=${resetToken}`;
     const emailResult = await sendEmail({
       to: user.email,
       subject: 'Intervexa AI - Password Reset request',
@@ -546,7 +555,7 @@ const findOrCreateSocialUser = async ({ provider, providerId, email, name, pictu
 
 exports.googleOAuthRedirect = (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
-  const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://intervexa-ai-sooty.vercel.app').replace(/\/$/, '');
+  const frontendBaseUrl = getFrontendBaseUrl(req);
 
   if (!clientId) {
     return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Google authentication is currently being configured on the server. Please sign in with email and password.')}`);
@@ -569,7 +578,7 @@ exports.googleOAuthRedirect = (req, res) => {
 };
 
 exports.googleOAuthCallback = async (req, res) => {
-  const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://intervexa-ai-sooty.vercel.app').replace(/\/$/, '');
+  const frontendBaseUrl = getFrontendBaseUrl(req);
   const { code, error } = req.query;
 
   if (error || !code) {
@@ -705,7 +714,7 @@ exports.googleTokenLogin = async (req, res, next) => {
 
 exports.facebookOAuthRedirect = (req, res) => {
   const appId = process.env.FACEBOOK_APP_ID;
-  const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://intervexa-ai-sooty.vercel.app').replace(/\/$/, '');
+  const frontendBaseUrl = getFrontendBaseUrl(req);
 
   if (!appId) {
     return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Facebook authentication is currently being configured on the server. Please sign in with email and password.')}`);
@@ -726,7 +735,7 @@ exports.facebookOAuthRedirect = (req, res) => {
 };
 
 exports.facebookOAuthCallback = async (req, res) => {
-  const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://intervexa-ai-sooty.vercel.app').replace(/\/$/, '');
+  const frontendBaseUrl = getFrontendBaseUrl(req);
   const { code, error, error_reason } = req.query;
 
   if (error || !code) {
