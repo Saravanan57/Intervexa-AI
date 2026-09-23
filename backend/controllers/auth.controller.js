@@ -6,6 +6,7 @@ const Role = require('../models/Role');
 const ActivityLog = require('../models/ActivityLog');
 const { sendEmail } = require('../services/email.service');
 const redis = require('../config/redis');
+const logger = require('../utils/logger');
 
 // Helper to generate tokens
 const generateTokens = (user) => {
