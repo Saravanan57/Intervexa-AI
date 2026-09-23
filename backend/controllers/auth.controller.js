@@ -32,9 +32,10 @@ exports.register = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Please provide name, email and password' });
     }
 
-    const existingUser = await User.findOne({ email });
+    const cleanEmail = email ? String(email).toLowerCase().trim() : '';
+    const existingUser = await User.findOne({ email: cleanEmail });
     if (existingUser) {
-      return res.status(400).json({ success: false, message: 'Email already registered' });
+      return res.status(400).json({ success: false, message: 'An account with this email already exists.' });
     }
 
     // Default to candidate role
@@ -51,7 +52,7 @@ exports.register = async (req, res, next) => {
 
     const newUser = await User.create({
       name,
-      email,
+      email: cleanEmail,
       password: hashedPassword,
       role: candidateRole._id,
       phone: phone || '',
@@ -224,7 +225,7 @@ exports.forgotPassword = async (req, res, next) => {
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
-    const frontendBaseUrl = process.env.FRONTEND_URL || req.headers.origin || `${req.protocol}://${req.get('host')}`;
+    const frontendBaseUrl = process.env.FRONTEND_URL || req.headers.origin || 'https://intervexa-ai-sooty.vercel.app';
     const resetUrl = `${frontendBaseUrl.replace(/\/$/, '')}/auth/reset-password?token=${resetToken}`;
     await sendEmail({
       to: user.email,

@@ -29,22 +29,37 @@ const app = express();
 const server = http.createServer(app);
 
 // Configure CORS domains
-const rawOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:4200,http://127.0.0.1:4200').split(',').map(o => o.trim());
+const defaultAllowedOrigins = [
+  'http://localhost:4200',
+  'http://127.0.0.1:4200',
+  'https://intervexa-ai-sooty.vercel.app',
+  'https://intervexa-ai.vercel.app'
+];
+
+const envOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim()).filter(Boolean);
 if (process.env.FRONTEND_URL) {
-  rawOrigins.push(process.env.FRONTEND_URL.trim());
+  envOrigins.push(process.env.FRONTEND_URL.trim());
 }
-const configuredOrigins = rawOrigins.map(o => o.replace(/\/$/, ''));
+
+const configuredOrigins = Array.from(new Set([
+  ...defaultAllowedOrigins,
+  ...envOrigins
+])).map(o => o.replace(/\/$/, ''));
 
 const corsOptions = {
   origin: (origin, callback) => {
-    const cleanOrigin = origin ? origin.replace(/\/$/, '') : origin;
-    if (!cleanOrigin || configuredOrigins.includes(cleanOrigin) || process.env.NODE_ENV !== 'production') {
+    if (!origin) return callback(null, true);
+    const cleanOrigin = origin.replace(/\/$/, '');
+    const isVercelDeploy = /^https:\/\/[a-z0-9-]+(\.vercel\.app)$/i.test(cleanOrigin);
+    if (configuredOrigins.includes(cleanOrigin) || isVercelDeploy || process.env.NODE_ENV !== 'production') {
       callback(null, true);
     } else {
       callback(new Error('CORS policy violation'));
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
 };
 
 // Socket.IO Setup
@@ -57,6 +72,7 @@ app.use(helmet({
   crossOriginResourcePolicy: false
 }));
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

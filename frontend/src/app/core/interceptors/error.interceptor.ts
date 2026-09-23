@@ -27,7 +27,24 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
         );
       }
 
-      const errorMsg = err.error?.message || err.statusText || 'An unknown network error occurred';
+      let errorMsg = err.error?.message;
+      if (!errorMsg) {
+        if (err.status === 0) {
+          errorMsg = 'Unable to connect to the server. Please check your connection and try again.';
+        } else if (err.status === 401) {
+          errorMsg = 'Invalid email or password.';
+        } else if (err.status === 403) {
+          errorMsg = 'Access forbidden. Your account may be restricted.';
+        } else if (err.status === 404) {
+          errorMsg = 'Requested resource not found.';
+        } else if (err.status >= 500) {
+          errorMsg = 'Unable to connect to the server. Please try again.';
+        } else {
+          errorMsg = err.statusText && err.statusText !== 'Unknown Error'
+            ? err.statusText
+            : 'An unexpected error occurred. Please try again.';
+        }
+      }
       return throwError(() => new Error(errorMsg));
     })
   );
