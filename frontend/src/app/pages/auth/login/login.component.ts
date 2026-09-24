@@ -9,15 +9,15 @@ import { AuthService } from '../../../core/services/auth.service';
   standalone: true,
   imports: [CommonModule, ReactiveFormsModule, RouterLink],
   template: `
-    <div class="min-h-[85vh] flex items-center justify-center py-12 px-4 sm:px-6">
-      <div class="max-w-md w-full bg-white border border-[#D9E2F1] rounded-3xl shadow-xl p-6 sm:p-8 relative animate-fade-in text-left">
+    <div class="min-h-[85vh] flex items-center justify-center py-8 sm:py-12 px-3.5 sm:px-6">
+      <div class="max-w-md w-full bg-white border border-[#D9E2F1] rounded-2xl sm:rounded-3xl shadow-xl p-5 sm:p-8 relative animate-fade-in text-left">
         
         <div class="space-y-1.5 mb-6 text-center">
           <div class="inline-flex items-center space-x-2 bg-primary/5 px-3 py-1 rounded-full text-primary text-xs font-bold uppercase tracking-wider mb-2">
             <span class="w-2 h-2 rounded-full bg-primary"></span>
             <span>Intervexa AI</span>
           </div>
-          <h2 class="text-3xl font-extrabold text-[#111827] font-sans">Welcome Back</h2>
+          <h2 class="text-2xl sm:text-3xl font-extrabold text-[#111827] font-sans break-words">Welcome Back</h2>
           <p class="text-xs text-muted">Log in to your account to continue preparing.</p>
         </div>
 

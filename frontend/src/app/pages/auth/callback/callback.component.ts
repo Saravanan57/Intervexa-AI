@@ -8,8 +8,8 @@ import { AuthService } from '../../../core/services/auth.service';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="min-h-[80vh] flex items-center justify-center py-12 px-4 sm:px-6">
-      <div class="max-w-md w-full bg-white border border-[#D9E2F1] rounded-3xl shadow-xl p-8 text-center animate-fade-in">
+    <div class="min-h-[80vh] flex items-center justify-center py-8 sm:py-12 px-3.5 sm:px-6">
+      <div class="max-w-md w-full bg-white border border-[#D9E2F1] rounded-2xl sm:rounded-3xl shadow-xl p-6 sm:p-8 text-center animate-fade-in">
         <div class="inline-flex items-center space-x-2 bg-primary/5 px-3 py-1 rounded-full text-primary text-xs font-bold uppercase tracking-wider mb-4">
           <span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
           <span>Intervexa AI Security</span>

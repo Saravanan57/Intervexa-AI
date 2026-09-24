@@ -9,10 +9,10 @@ import { AuthService } from '../../core/services/auth.service';
   standalone: true,
   imports: [CommonModule, ReactiveFormsModule],
   template: `
-    <div class="max-w-7xl mx-auto px-6 md:px-12 py-10 space-y-8 relative text-left">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 md:px-12 py-6 sm:py-10 space-y-6 sm:space-y-8 relative text-left overflow-x-hidden">
       <div class="space-y-2 animate-fade-in text-left">
         <span class="text-[10px] font-bold text-primary bg-primary/10 px-3 py-1 rounded-full uppercase tracking-wider">Candidate Profile</span>
-        <h2 class="text-3xl font-extrabold text-[#111827]">Your Candidate Profile</h2>
+        <h2 class="text-2xl sm:text-3xl font-extrabold text-[#111827] break-words">Your Candidate Profile</h2>
         <p class="text-xs text-muted">Manage your personal credentials, portfolio projects, and interview target preferences.</p>
       </div>
 
@@ -27,7 +27,7 @@ import { AuthService } from '../../core/services/auth.service';
         
         <!-- Left details column (Personal Info + Socials) -->
         <div class="lg:col-span-1 space-y-6">
-          <div class="glass p-6 rounded-3xl space-y-5 shadow-sm text-left">
+          <div class="glass p-5 sm:p-6 rounded-2xl sm:rounded-3xl space-y-5 shadow-sm text-left">
             <h3 class="text-xs font-bold text-[#111827] uppercase tracking-wider">Personal Info</h3>
             
             <div class="space-y-3.5">
@@ -225,11 +225,11 @@ import { AuthService } from '../../core/services/auth.service';
           </div>
 
           <!-- Submit Bar -->
-          <div class="flex justify-end pt-4">
+          <div class="flex justify-stretch sm:justify-end pt-4">
             <button 
               type="submit" 
               [disabled]="profileForm.invalid || isSaving()"
-              class="px-8 py-3.5 rounded-full bg-gradient-primary text-xs font-bold text-white shadow-lg shadow-primary/10 disabled:opacity-50 transition-all flex items-center space-x-2"
+              class="w-full sm:w-auto px-8 py-3.5 rounded-full bg-gradient-primary text-xs font-bold text-white shadow-lg shadow-primary/10 disabled:opacity-50 transition-all flex items-center justify-center space-x-2"
             >
               @if (isSaving()) {
                 <span class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>

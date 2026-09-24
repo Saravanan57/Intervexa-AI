@@ -94,6 +94,21 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Responsive Viewport & Overflow Safeguards */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+img, video, canvas {
+  max-width: 100%;
+}
+
+pre, code {
+  max-width: 100%;
+  overflow-x: auto;
+  word-break: break-word;
+}
+
 /* Touch Action & Responsive Input Zoom Prevention */
 html, body, a, button, input, select, textarea {
   touch-action: manipulation;

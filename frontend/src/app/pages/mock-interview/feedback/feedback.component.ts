@@ -8,7 +8,7 @@ import { InterviewService } from '../../../core/services/interview.service';
   standalone: true,
   imports: [CommonModule, RouterLink],
   template: `
-    <div class="max-w-7xl mx-auto px-6 md:px-12 py-10 space-y-8 relative animate-fade-in text-left">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 md:px-12 py-6 sm:py-10 space-y-6 sm:space-y-8 relative animate-fade-in text-left overflow-x-hidden">
       @if (isLoading()) {
         <div class="glass p-12 text-center space-y-4 shadow-sm">
           <span class="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin inline-block"></span>
@@ -16,22 +16,22 @@ import { InterviewService } from '../../../core/services/interview.service';
         </div>
       } @else if (interview()) {
         <!-- Header banner -->
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white border border-[#D9E2F1] p-8 rounded-3xl relative shadow-sm">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white border border-[#D9E2F1] p-5 sm:p-8 rounded-2xl sm:rounded-3xl relative shadow-sm">
           <div class="space-y-2 z-10 text-left">
             <span class="text-[10px] font-bold text-primary bg-primary/10 px-3 py-1 rounded-full uppercase tracking-wider">Session Complete</span>
-            <h2 class="text-3xl font-extrabold text-[#111827]">Interview Scorecard</h2>
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-[#111827] break-words">Interview Scorecard</h2>
             <p class="text-xs text-muted">Complete breakdown of performance and AI coaching reviews.</p>
           </div>
-          <div class="flex items-center space-x-3 z-10 shrink-0">
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 z-10 w-full md:w-auto shrink-0">
             <button 
               (click)="downloadReport()" 
-              class="text-xs font-bold py-3 px-6 rounded-full border border-[#D9E2F1] bg-white hover:bg-[#0145F2]/5 text-[#111827] transition-all shadow-sm"
+              class="text-xs font-bold py-3 px-6 rounded-full border border-[#D9E2F1] bg-white hover:bg-[#0145F2]/5 text-[#111827] transition-all shadow-sm text-center w-full sm:w-auto"
             >
               📥 Download Report
             </button>
             <a 
               routerLink="/dashboard" 
-              class="text-xs font-bold py-3 px-6 rounded-full bg-gradient-primary hover:opacity-95 text-white transition-all shadow-md shadow-primary/15"
+              class="text-xs font-bold py-3 px-6 rounded-full bg-gradient-primary hover:opacity-95 text-white transition-all shadow-md shadow-primary/15 text-center w-full sm:w-auto"
             >
               Back to Dashboard
             </a>
@@ -41,7 +41,7 @@ import { InterviewService } from '../../../core/services/interview.service';
         <!-- Scores & Strengths columns -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <!-- Main overall gauge -->
-          <div class="lg:col-span-1 glass p-8 rounded-3xl flex flex-col items-center justify-center space-y-6 text-center shadow-sm">
+          <div class="lg:col-span-1 glass p-5 sm:p-8 rounded-2xl sm:rounded-3xl flex flex-col items-center justify-center space-y-6 text-center shadow-sm">
             <span class="text-xs font-bold text-[#4B5563] uppercase tracking-wider">Overall Score</span>
             
             <!-- Circular Gauge SVG -->

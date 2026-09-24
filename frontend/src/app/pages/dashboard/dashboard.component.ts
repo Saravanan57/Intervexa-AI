@@ -14,27 +14,27 @@ Chart.register(...registerables);
   standalone: true,
   imports: [CommonModule, RouterLink],
   template: `
-    <div class="max-w-7xl mx-auto px-6 md:px-12 py-10 space-y-8 relative animate-fade-in text-left">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 md:px-12 py-6 sm:py-10 space-y-6 sm:space-y-8 relative animate-fade-in text-left overflow-x-hidden">
       <!-- Glow decoration -->
       <div class="absolute w-[300px] h-[300px] bg-primary/5 blur-[90px] rounded-full top-[10%] left-[20%] pointer-events-none -z-10"></div>
 
       <!-- Welcome Card Header -->
-      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white border border-[#D9E2F1] p-8 rounded-3xl relative overflow-hidden shadow-sm">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white border border-[#D9E2F1] p-5 sm:p-8 rounded-2xl sm:rounded-3xl relative overflow-hidden shadow-sm">
         <div class="space-y-2 z-10 text-left">
           <span class="text-[10px] font-bold text-primary bg-primary/10 px-3 py-1 rounded-full uppercase tracking-wider">Candidate Workspace</span>
-          <h2 class="text-3xl font-extrabold text-[#111827]">Welcome back, {{ authService.currentUser()?.name }}!</h2>
+          <h2 class="text-2xl sm:text-3xl font-extrabold text-[#111827] break-words">Welcome back, {{ authService.currentUser()?.name }}!</h2>
           <p class="text-xs text-muted">Ready to practice? Analyze your resume and review active AI recommendations.</p>
         </div>
-        <div class="flex items-center space-x-3 z-10 shrink-0">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 z-10 w-full md:w-auto shrink-0">
           <a 
             routerLink="/resume-analyzer" 
-            class="text-xs font-bold py-3 px-6 rounded-full border border-[#D9E2F1] bg-white hover:bg-[#0145F2]/5 text-[#111827] transition-all shadow-sm"
+            class="text-xs font-bold py-3 px-6 rounded-full border border-[#D9E2F1] bg-white hover:bg-[#0145F2]/5 text-[#111827] transition-all shadow-sm text-center"
           >
             Upload Resume
           </a>
           <a 
             routerLink="/mock-interview" 
-            class="text-xs font-bold py-3 px-6 rounded-full bg-gradient-primary hover:opacity-95 text-white transition-all shadow-md shadow-primary/15"
+            class="text-xs font-bold py-3 px-6 rounded-full bg-gradient-primary hover:opacity-95 text-white transition-all shadow-md shadow-primary/15 text-center"
           >
             Start Mock Interview
           </a>

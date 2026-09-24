@@ -20,11 +20,11 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
       <!-- Header / Sticky Glass Navbar -->
       <header 
         [class.scrolled]="isScrolled()" 
-        class="sticky top-0 z-50 w-full border-b border-transparent py-4 px-6 md:px-12 flex items-center justify-between bg-white/80 backdrop-blur-md"
+        class="sticky top-0 z-50 w-full border-b border-transparent py-3.5 sm:py-4 px-4 sm:px-6 md:px-12 flex items-center justify-between bg-white/80 backdrop-blur-md"
       >
         <!-- Logo -->
-        <a routerLink="/" class="flex items-center space-x-2.5 text-2xl font-bold tracking-tight text-[#111827] hover:opacity-90">
-          <img src="assets/images/logo.png" alt="Intervexa AI Logo" class="w-8 h-8 object-contain rounded-md" />
+        <a routerLink="/" class="flex items-center space-x-2 sm:space-x-2.5 text-xl sm:text-2xl font-bold tracking-tight text-[#111827] hover:opacity-90 shrink-0">
+          <img src="assets/images/logo.png" alt="Intervexa AI Logo" class="w-7 h-7 sm:w-8 sm:h-8 object-contain rounded-md" />
           <span class="text-gradient-primary">Intervexa AI</span>
         </a>
 
@@ -41,13 +41,13 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
         </nav>
 
         <!-- Right Side Auth Actions -->
-        <div class="flex items-center space-x-4 relative">
+        <div class="flex items-center space-x-2 sm:space-x-4 relative">
           @if (authService.isAuthenticated()) {
             <!-- Notifications Bell -->
             <div class="relative">
               <button 
                 (click)="toggleNotifications()" 
-                class="w-9 h-9 rounded-full bg-white border border-[#D9E2F1] hover:bg-[#0145F2]/5 flex items-center justify-center text-sm transition-all"
+                class="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white border border-[#D9E2F1] hover:bg-[#0145F2]/5 flex items-center justify-center text-sm transition-all"
                 title="Notifications"
               >
                 <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -62,7 +62,7 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
 
               <!-- Notifications Drawer Dropdown -->
               @if (showNotifications()) {
-                <div class="absolute right-0 mt-3 w-80 glass border border-[#D9E2F1] rounded-2xl p-4 shadow-xl z-50 space-y-3 animate-fade-in">
+                <div class="absolute right-0 mt-3 w-[calc(100vw-2rem)] max-w-xs sm:w-80 glass border border-[#D9E2F1] rounded-2xl p-4 shadow-xl z-50 space-y-3 animate-fade-in">
                   <div class="flex justify-between items-center border-b border-[#D9E2F1] pb-2">
                     <span class="text-xs font-bold text-[#111827]">Notifications</span>
                     <button 
@@ -104,7 +104,7 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
             <!-- Profile & Settings links -->
             <a 
               routerLink="/profile" 
-              class="flex items-center space-x-2 bg-white border border-[#D9E2F1] py-1.5 px-3 rounded-full hover:border-primary/45 transition-all cursor-pointer shadow-sm"
+              class="flex items-center space-x-1.5 sm:space-x-2 bg-white border border-[#D9E2F1] py-1 sm:py-1.5 px-2 sm:px-3 rounded-full hover:border-primary/45 transition-all cursor-pointer shadow-sm"
             >
               <div class="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-xs font-bold uppercase text-white shadow-sm">
                 {{ authService.currentUser()?.name?.charAt(0) || 'U' }}
@@ -112,10 +112,10 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
               <span class="text-xs hidden sm:inline-block font-bold text-[#111827]">{{ authService.currentUser()?.name }}</span>
             </a>
 
-            <!-- Settings icon -->
+            <!-- Settings icon (hidden on small mobile, accessible in mobile menu) -->
             <a 
               routerLink="/settings" 
-              class="w-9 h-9 rounded-full bg-white border border-[#D9E2F1] hover:bg-[#0145F2]/5 flex items-center justify-center text-sm transition-all"
+              class="hidden sm:flex w-9 h-9 rounded-full bg-white border border-[#D9E2F1] hover:bg-[#0145F2]/5 items-center justify-center text-sm transition-all"
               title="Settings"
             >
               <svg class="w-4 h-4 text-[#4B5563]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,29 +124,30 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
               </svg>
             </a>
 
+            <!-- Logout button (hidden on small mobile, accessible in mobile menu) -->
             <button 
               (click)="logout()" 
-              class="text-xs py-2 px-4 rounded-full border border-[#D9E2F1] hover:border-error hover:text-error transition-all font-semibold"
+              class="hidden sm:inline-block text-xs py-2 px-4 rounded-full border border-[#D9E2F1] hover:border-error hover:text-error transition-all font-semibold"
             >
               Logout
             </button>
           } @else {
             <button 
               (click)="authModalService.openModal('Sign in to access your Intervexa AI features.', 'login')" 
-              class="text-xs sm:text-sm font-medium hover:text-primary transition-colors py-1.5 px-2.5 sm:px-4 text-[#4B5563] shrink-0"
+              class="text-xs sm:text-sm font-medium hover:text-primary transition-colors py-1.5 px-2 sm:px-4 text-[#4B5563] shrink-0"
             >
               Login
             </button>
             <button 
               (click)="authModalService.openModal('Create your free Intervexa AI account.', 'register')" 
-              class="text-xs sm:text-sm font-semibold py-1.5 px-3 sm:px-5 rounded-full bg-gradient-to-r from-[#0145F2] to-[#1E5BFA] hover:opacity-95 transition-opacity shadow-md text-white shrink-0"
+              class="text-xs sm:text-sm font-semibold py-1.5 px-2.5 sm:px-5 rounded-full bg-gradient-to-r from-[#0145F2] to-[#1E5BFA] hover:opacity-95 transition-opacity shadow-md text-white shrink-0"
             >
               Register
             </button>
           }
 
           <!-- Mobile Menu Toggle -->
-          <button (click)="toggleMobileMenu()" class="md:hidden flex flex-col justify-center items-center w-6 h-6 space-y-1">
+          <button (click)="toggleMobileMenu()" class="md:hidden flex flex-col justify-center items-center w-6 h-6 space-y-1 shrink-0 ml-1" aria-label="Toggle Navigation Menu">
             <span class="block w-5 h-0.5 bg-[#111827] transition-transform" [class.rotate-45]="isMobileMenuOpen()" [class.translate-y-1.5]="isMobileMenuOpen()"></span>
             <span class="block w-5 h-0.5 bg-[#111827] transition-opacity" [class.opacity-0]="isMobileMenuOpen()"></span>
             <span class="block w-5 h-0.5 bg-[#111827] transition-transform" [class.-rotate-45]="isMobileMenuOpen()" [class.-translate-y-1.5]="isMobileMenuOpen()"></span>
@@ -156,7 +157,7 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
 
       <!-- Mobile Dropdown Menu -->
       @if (isMobileMenuOpen()) {
-        <div class="md:hidden glass border-b border-[#D9E2F1] py-6 px-8 flex flex-col space-y-4 text-sm font-semibold z-40 fixed top-[73px] left-0 w-full animate-fade-in bg-white">
+        <div class="md:hidden glass border-b border-[#D9E2F1] py-5 px-6 flex flex-col space-y-3 text-sm font-semibold z-40 fixed top-[60px] sm:top-[73px] left-0 w-full animate-fade-in bg-white shadow-lg max-h-[calc(100vh-73px)] overflow-y-auto">
           <a routerLink="/resume-analyzer" (click)="toggleMobileMenu()" class="hover:text-primary py-2 text-[#4B5563]">Resume Analyzer</a>
           <a routerLink="/mock-interview" (click)="toggleMobileMenu()" class="hover:text-primary py-2 text-[#4B5563]">Mock Interview</a>
           @if (authService.isAuthenticated()) {
@@ -166,6 +167,9 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
             @if (authService.isAdmin()) {
               <a routerLink="/admin" (click)="toggleMobileMenu()" class="hover:text-primary py-2 text-[#4B5563]">Admin Settings</a>
             }
+            <button (click)="toggleMobileMenu(); logout()" class="text-left text-error hover:opacity-80 py-2 font-bold border-t border-[#D9E2F1]/60 pt-3">
+              Logout
+            </button>
           } @else {
             <button (click)="toggleMobileMenu(); authModalService.openModal('Sign in to access your account.', 'login')" class="text-left hover:text-primary py-2 text-[#4B5563]">Login</button>
             <button (click)="toggleMobileMenu(); authModalService.openModal('Create your free Intervexa AI account.', 'register')" class="text-left hover:text-primary py-2 text-primary font-bold">Register</button>

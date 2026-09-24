@@ -9,11 +9,11 @@ import { InterviewService } from '../../../core/services/interview.service';
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="max-w-7xl mx-auto px-6 md:px-12 py-10 space-y-8 relative text-left">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 md:px-12 py-6 sm:py-10 space-y-6 sm:space-y-8 relative text-left overflow-x-hidden">
       
       <!-- PHASE 1: PRE-INTERVIEW SYSTEM CHECK -->
       @if (isCheckingSystem()) {
-        <div class="max-w-3xl mx-auto glass p-8 rounded-3xl space-y-6 animate-fade-in shadow-sm">
+        <div class="max-w-3xl mx-auto glass p-5 sm:p-8 rounded-2xl sm:rounded-3xl space-y-6 animate-fade-in shadow-sm">
           <div class="text-center space-y-2">
             <span class="text-[10px] font-bold text-primary bg-primary/10 px-3 py-1 rounded-full uppercase tracking-wider">Device Configuration</span>
             <h3 class="text-2xl font-extrabold text-[#111827]">System Check Wizard</h3>
@@ -102,18 +102,18 @@ import { InterviewService } from '../../../core/services/interview.service';
       <!-- PHASE 3: ACTIVE MOCK PANEL -->
       @else if (session()) {
         <!-- Header details status bar -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-[#D9E2F1] p-6 rounded-2xl shadow-sm">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white border border-[#D9E2F1] p-4 sm:p-6 rounded-2xl shadow-sm">
           <div class="flex flex-wrap items-center gap-3">
             <span class="w-3 h-3 rounded-full bg-error animate-pulse shrink-0"></span>
             <span class="text-xs font-bold text-[#111827] uppercase tracking-wider">Live {{ session()?.type }} ({{ session()?.domain }} - {{ session()?.difficulty }})</span>
           </div>
           <!-- Predicted score scorecard widget -->
-          <div class="flex items-center space-x-6 text-xs shrink-0 font-semibold text-[#4B5563]">
+          <div class="flex flex-wrap items-center gap-3 sm:gap-6 text-xs shrink-0 font-semibold text-[#4B5563]">
             <div class="flex items-center space-x-2">
               <span class="text-muted font-bold">PREDICTED SCORE:</span>
               <span class="text-primary font-extrabold text-sm">{{ session()?.predictedScore || 0 }}%</span>
             </div>
-            <div class="flex items-center space-x-2 border-l border-[#D9E2F1] pl-6 font-mono">
+            <div class="flex items-center space-x-2 border-l border-[#D9E2F1] pl-3 sm:pl-6 font-mono">
               <span class="text-muted font-bold">TIMER:</span>
               <span class="text-[#111827] font-black text-sm">{{ formatTime(secondsElapsed()) }}</span>
             </div>
@@ -122,7 +122,81 @@ import { InterviewService } from '../../../core/services/interview.service';
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <!-- Left side question card with AI Avatar -->
-          <div class="glass p-8 rounded-3xl space-y-6 flex flex-col justify-between min-h-[420px] shadow-sm">
+          <div class="glass p-5 sm:p-8 rounded-2xl sm:rounded-3xl space-y-6 flex flex-col justify-between min-h-[420px] shadow-sm">
+            <div class="space-y-4">
+              <div class="flex justify-between items-center">
+                <span class="text-[9px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider">Question {{ currentIdx() + 1 }} of {{ totalQuestions() }}</span>
+                <span class="text-[9px] text-muted font-semibold">{{ totalQuestions() - currentIdx() - 1 }} remaining</span>
+              </div>
+              <h3 class="text-lg md:text-xl font-bold leading-relaxed text-[#111827]">
+                {{ currentQuestionText() }}
+              </h3>
+            </div>
+
+            <!-- Visual AI Avatar waveforms -->
+            <div class="flex flex-col items-center justify-center space-y-4 py-8 bg-[#EDF1F5]/40 border border-[#D9E2F1] rounded-2xl relative overflow-hidden shadow-inner">
+              @if (isRecording() && !isSpeechPaused()) {
+                <div class="flex items-end space-x-1.5 h-16">
+                  <div class="wave-bar w-1 bg-primary h-6 rounded-full" style="animation-delay: 0.1s"></div>
+                  <div class="wave-bar w-1 bg-primary/80 h-12 rounded-full" style="animation-delay: 0.2s"></div>
+                  <div class="wave-bar w-1 bg-primary h-14 rounded-full" style="animation-delay: 0.3s"></div>
+                  <div class="wave-bar w-1 bg-primary/80 h-8 rounded-full" style="animation-delay: 0.4s"></div>
+                  <div class="wave-bar w-1 bg-primary h-10 rounded-full" style="animation-delay: 0.5s"></div>
+                </div>
+                <span class="text-[9px] text-primary uppercase tracking-widest font-bold font-mono">Listening and transcribing...</span>
+              } @else if (isSpeechPaused()) {
+                <div class="w-12 h-12 rounded-full bg-white border border-[#D9E2F1] flex items-center justify-center text-muted font-bold text-xs shadow-sm">
+                  ||
+                </div>
+                <span class="text-[9px] text-warning uppercase tracking-widest font-bold font-mono">Speech recording paused</span>
+              } @else {
+                <div class="w-12 h-12 rounded-full bg-white border border-[#D9E2F1] flex items-center justify-center text-muted shadow-sm">
+                  <svg class="w-5 h-5 text-[#6B7280]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+                </div>
+                <span class="text-[9px] text-muted uppercase tracking-widest font-bold font-mono">Microphone is standby</span>
+              }
+            </div>
+
+            <!-- Voice actions controllers -->
+            <div class="flex flex-wrap items-center gap-3">
+              @if (session()?.type !== 'Coding') {
+                <button 
+                  (click)="toggleRecording()" 
+                  [class.bg-error]="isRecording()"
+                  [class.bg-primary]="!isRecording()"
+                  class="flex items-center space-x-2 py-2.5 px-5 rounded-full text-xs font-bold text-white transition-all hover:scale-[1.02] shadow-md"
+                >
+                  <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+                  <span>{{ isRecording() ? 'Stop Recording' : 'Speak Answer' }}</span>
+                </button>
+                @if (isRecording()) {
+                  <button 
+                    (click)="togglePauseResume()" 
+                    class="flex items-center space-x-2 py-2.5 px-5 rounded-full bg-white border border-[#D9E2F1] hover:bg-[#EDF1F5] text-xs font-bold text-[#111827] transition-all"
+                  >
+                    <span>{{ isSpeechPaused() ? '▶ Resume' : '⏸ Pause' }}</span>
+                  </button>
+                }
+              }
+              <button 
+                (click)="speakQuestion()" 
+                class="flex items-center space-x-2 py-2.5 px-5 rounded-full bg-white border border-[#D9E2F1] hover:bg-[#0145F2]/5 text-xs font-bold transition-all text-[#111827]"
+              >
+                <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                <span>Repeat Question</span>
+              </button>
+              <button 
+                (click)="skipQuestion()" 
+                [disabled]="isSubmitting()"
+                class="flex items-center space-x-2 py-2.5 px-5 rounded-full bg-white border border-[#D9E2F1] hover:bg-error/5 hover:text-error text-xs font-bold transition-all text-muted disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <span>Skip Question ➡</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Right side input scorecard -->
+          <div class="glass p-5 sm:p-8 rounded-2xl sm:rounded-3xl space-y-6 flex flex-col justify-between shadow-sm">
             <div class="space-y-4">
               <div class="flex justify-between items-center">
                 <span class="text-[9px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider">Question {{ currentIdx() + 1 }} of {{ totalQuestions() }}</span>

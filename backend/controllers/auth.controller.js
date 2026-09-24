@@ -977,6 +977,11 @@ exports.facebookOAuthCallback = async (req, res) => {
     return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent(errorMsg)}`);
   }
 
+  if (!process.env.FACEBOOK_APP_ID || !process.env.FACEBOOK_APP_SECRET) {
+    logger.error('Facebook OAuth callback called but FACEBOOK_APP_ID or FACEBOOK_APP_SECRET is not configured');
+    return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Facebook authentication is currently being configured on the server.')}`);
+  }
+
   try {
     const redirectUri = getFacebookCallbackUrl(req);
 
@@ -1047,7 +1052,10 @@ exports.facebookOAuthCallback = async (req, res) => {
     res.redirect(`${frontendBaseUrl}/auth/callback?code=${encodeURIComponent(authCode)}`);
   } catch (err) {
     logger.error('Facebook OAuth callback error: %s', err.message);
-    res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('An error occurred during Facebook sign-in. Please try again.')}`);
+    const clientMsg = (err.message && err.message.includes('verified email address'))
+      ? err.message
+      : 'An error occurred during Facebook sign-in. Please try again.';
+    res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent(clientMsg)}`);
   }
 };
 
