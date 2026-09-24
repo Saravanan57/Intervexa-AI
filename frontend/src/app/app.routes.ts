@@ -106,6 +106,20 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/legal/terms/terms.component').then(m => m.TermsComponent)
       },
       {
+        path: 'legal/data-deletion',
+        loadComponent: () => import('./pages/legal/data-deletion/data-deletion.component').then(m => m.DataDeletionComponent)
+      },
+      {
+        path: 'data-deletion-status',
+        redirectTo: 'legal/data-deletion',
+        pathMatch: 'full'
+      },
+      {
+        path: 'data-deletion',
+        redirectTo: 'legal/data-deletion',
+        pathMatch: 'full'
+      },
+      {
         path: 'legal/support',
         loadComponent: () => import('./pages/legal/support/support.component').then(m => m.SupportComponent)
       },

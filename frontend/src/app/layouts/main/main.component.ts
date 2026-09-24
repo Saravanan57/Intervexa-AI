@@ -215,6 +215,7 @@ import { AuthModalComponent } from '../../core/components/auth-modal/auth-modal.
             <ul class="space-y-2 text-xs text-muted">
               <li><a routerLink="/legal/privacy" class="hover:text-primary transition-colors cursor-pointer focus:outline-none focus:underline">Privacy Policy</a></li>
               <li><a routerLink="/legal/terms" class="hover:text-primary transition-colors cursor-pointer focus:outline-none focus:underline">Terms of Service</a></li>
+              <li><a routerLink="/legal/data-deletion" class="hover:text-primary transition-colors cursor-pointer focus:outline-none focus:underline">Data Deletion</a></li>
               <li><a routerLink="/legal/support" class="hover:text-primary transition-colors cursor-pointer focus:outline-none focus:underline">Support Desk</a></li>
             </ul>
           </div>
