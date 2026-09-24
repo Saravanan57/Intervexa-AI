@@ -20,6 +20,7 @@ router.get('/facebook', authController.facebookOAuthRedirect);
 router.get('/facebook/url', authController.getFacebookAuthUrl);
 router.get('/facebook/callback', authController.facebookOAuthCallback);
 router.post('/facebook', authController.facebookTokenLogin);
+router.post('/facebook/data-deletion', authController.facebookDataDeletionCallback);
 
 router.post('/exchange-code', authController.exchangeAuthCode);
 

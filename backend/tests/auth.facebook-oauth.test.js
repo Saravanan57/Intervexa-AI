@@ -229,4 +229,141 @@ describe('Auth Controller - Facebook OAuth Flow Tests', () => {
       }));
     });
   });
+
+  describe('facebookDataDeletionCallback', () => {
+    const helperGenerateSignedRequest = (payload, secret = 'mock-facebook-app-secret-abcde') => {
+      const payloadStr = JSON.stringify(payload);
+      const encodedPayload = Buffer.from(payloadStr)
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      const sig = crypto
+        .createHmac('sha256', secret)
+        .update(encodedPayload)
+        .digest('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      return `${sig}.${encodedPayload}`;
+    };
+
+    it('8. valid signed_request: should verify signature, lookup user, create confirmation code, and return 200 with status URL', async () => {
+      const fbUserId = 'fb-user-data-delete-999';
+      User.findOne.mockResolvedValue({
+        _id: 'user-db-999',
+        name: 'Delete Me Candidate',
+        email: 'deleteme@example.com',
+        facebookId: fbUserId
+      });
+      ActivityLog.create.mockResolvedValue({});
+
+      const validSignedRequest = helperGenerateSignedRequest({
+        algorithm: 'HMAC-SHA256',
+        issued_at: Math.floor(Date.now() / 1000),
+        user_id: fbUserId
+      });
+
+      req = {
+        body: { signed_request: validSignedRequest },
+        ip: '127.0.0.1'
+      };
+
+      await authController.facebookDataDeletionCallback(req, res, next);
+
+      expect(User.findOne).toHaveBeenCalledWith({ facebookId: fbUserId });
+      expect(ActivityLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        user: 'user-db-999',
+        action: 'DATA_DELETION_REQUESTED'
+      }));
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonResponse = res.json.mock.calls[0][0];
+      expect(jsonResponse).toHaveProperty('url');
+      expect(jsonResponse).toHaveProperty('confirmation_code');
+      expect(jsonResponse.confirmation_code).toMatch(/^[a-f0-9]{32}$/);
+      expect(jsonResponse.url).toBe(`https://intervexa-ai-sooty.vercel.app/data-deletion-status?code=${jsonResponse.confirmation_code}`);
+    });
+
+    it('9. unmatched user in database: should still return 200 with valid confirmation tracking code', async () => {
+      const fbUserId = 'fb-unmatched-user-000';
+      User.findOne.mockResolvedValue(null);
+
+      const validSignedRequest = helperGenerateSignedRequest({
+        algorithm: 'HMAC-SHA256',
+        issued_at: Math.floor(Date.now() / 1000),
+        user_id: fbUserId
+      });
+
+      req = {
+        body: { signed_request: validSignedRequest },
+        ip: '127.0.0.1'
+      };
+
+      await authController.facebookDataDeletionCallback(req, res, next);
+
+      expect(User.findOne).toHaveBeenCalledWith({ facebookId: fbUserId });
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonResponse = res.json.mock.calls[0][0];
+      expect(jsonResponse).toHaveProperty('url');
+      expect(jsonResponse).toHaveProperty('confirmation_code');
+      expect(jsonResponse.url).toContain(jsonResponse.confirmation_code);
+    });
+
+    it('10. missing signed_request: should return 400 Bad Request', async () => {
+      req = { body: {} };
+
+      await authController.facebookDataDeletionCallback(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        message: expect.stringContaining('Missing or invalid signed_request')
+      }));
+    });
+
+    it('11. invalid signature: should reject request with 400 Bad Request', async () => {
+      const invalidSignedRequest = helperGenerateSignedRequest(
+        { algorithm: 'HMAC-SHA256', user_id: 'fb-user-fake' },
+        'wrong-secret-key-99999'
+      );
+
+      req = { body: { signed_request: invalidSignedRequest } };
+
+      await authController.facebookDataDeletionCallback(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        message: 'Invalid signature in signed_request'
+      }));
+    });
+
+    it('12. malformed signed_request structure: should reject request with 400 Bad Request', async () => {
+      req = { body: { signed_request: 'invalid-single-part-string' } };
+
+      await authController.facebookDataDeletionCallback(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        message: expect.stringContaining('Invalid signed_request format')
+      }));
+    });
+
+    it('13. missing FACEBOOK_APP_SECRET: should return 503 Service Unavailable', async () => {
+      delete process.env.FACEBOOK_APP_SECRET;
+
+      req = { body: { signed_request: 'some.request' } };
+
+      await authController.facebookDataDeletionCallback(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(503);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        message: expect.stringContaining('Facebook data deletion service is currently unavailable')
+      }));
+    });
+  });
 });
+
