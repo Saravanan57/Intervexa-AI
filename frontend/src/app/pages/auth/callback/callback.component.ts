@@ -33,6 +33,7 @@ export class CallbackComponent implements OnInit {
   ngOnInit() {
     this.route.queryParams.subscribe((params) => {
       const error = params['error'];
+      const code = params['code'];
       const token = params['token'];
       const refreshToken = params['refreshToken'];
 
@@ -41,7 +42,23 @@ export class CallbackComponent implements OnInit {
         return;
       }
 
+      if (code) {
+        this.authService.exchangeAuthCode(code).subscribe({
+          next: () => {
+            this.router.navigate(['/dashboard']);
+          },
+          error: (err) => {
+            const errorMsg = err.error?.message || 'Authentication session verification failed. Please try signing in again.';
+            this.router.navigate(['/auth/login'], {
+              queryParams: { error: errorMsg }
+            });
+          }
+        });
+        return;
+      }
+
       if (token && refreshToken) {
+        // Fallback for legacy direct token redirects
         this.authService.handleSocialTokens(token, refreshToken).subscribe({
           next: () => {
             this.router.navigate(['/dashboard']);

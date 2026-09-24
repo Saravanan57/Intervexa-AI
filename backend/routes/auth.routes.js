@@ -12,12 +12,16 @@ router.post('/reset-password', authController.resetPassword);
 
 // Social authentication routes
 router.get('/google', authController.googleOAuthRedirect);
+router.get('/google/url', authController.getGoogleAuthUrl);
 router.get('/google/callback', authController.googleOAuthCallback);
 router.post('/google', authController.googleTokenLogin);
 
 router.get('/facebook', authController.facebookOAuthRedirect);
+router.get('/facebook/url', authController.getFacebookAuthUrl);
 router.get('/facebook/callback', authController.facebookOAuthCallback);
 router.post('/facebook', authController.facebookTokenLogin);
+
+router.post('/exchange-code', authController.exchangeAuthCode);
 
 // Protected routes
 router.get('/me', protect, authController.getMe);

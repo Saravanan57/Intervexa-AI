@@ -27,11 +27,29 @@ const generateTokens = (user) => {
 
 // Helper to reliably compute trimmed frontend URL with https:// prefix
 const getFrontendBaseUrl = (req) => {
-  let url = (process.env.FRONTEND_URL || req?.headers?.origin || 'https://intervexa-ai-sooty.vercel.app').trim();
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = `https://${url}`;
+  if (process.env.FRONTEND_URL && process.env.FRONTEND_URL.trim()) {
+    let url = process.env.FRONTEND_URL.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `https://${url}`;
+    }
+    return url.replace(/\/+$/, '');
   }
-  return url.replace(/\/+$/, '');
+
+  const rawOrigin = req?.headers?.origin || req?.headers?.referer;
+  if (rawOrigin && typeof rawOrigin === 'string') {
+    try {
+      const parsed = new URL(rawOrigin);
+      const isLocalhost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      // In production, never return or redirect to localhost
+      if (process.env.NODE_ENV !== 'production' || !isLocalhost) {
+        return parsed.origin;
+      }
+    } catch (e) {
+      // Ignore URL parsing errors and fallback
+    }
+  }
+
+  return 'https://intervexa-ai-sooty.vercel.app';
 };
 
 exports.register = async (req, res, next) => {
@@ -230,16 +248,32 @@ exports.verifyEmail = async (req, res, next) => {
 exports.forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
-    const cleanEmail = email ? String(email).toLowerCase().trim() : '';
-    const user = await User.findOne({ email: cleanEmail });
-    
-    if (!user) {
-      // For security, don't reveal user doesn't exist
-      return res.status(200).json({ success: true, message: 'If a matching email exists, reset instructions have been sent.' });
+
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ success: false, message: 'Please provide a valid email address.' });
     }
 
+    const cleanEmail = email.toLowerCase().trim();
+    // Validate basic email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid email address.' });
+    }
+
+    const user = await User.findOne({ email: cleanEmail });
+    
+    // For security, do not reveal if a user exists or not
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        message: 'If an account exists with this email address, password reset instructions have been sent.'
+      });
+    }
+
+    // Generate secure 32-byte (256-bit) crypto token
     const resetToken = crypto.randomBytes(32).toString('hex');
-    user.resetPasswordToken = resetToken;
+    // Store only the secure SHA-256 hash representation in the database
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    user.resetPasswordToken = hashedToken;
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
@@ -247,7 +281,7 @@ exports.forgotPassword = async (req, res, next) => {
     const resetUrl = `${frontendBaseUrl}/auth/reset-password?token=${resetToken}`;
     const emailResult = await sendEmail({
       to: user.email,
-      subject: 'Intervexa AI - Password Reset request',
+      subject: 'Intervexa AI - Password Reset Request',
       text: `Reset your password here: ${resetUrl}`,
       html: `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;">
@@ -268,6 +302,11 @@ exports.forgotPassword = async (req, res, next) => {
     });
 
     if (!emailResult || !emailResult.success) {
+      // Invalidate the token so an undelivered token does not remain valid
+      user.resetPasswordToken = '';
+      user.resetPasswordExpires = null;
+      await user.save().catch(() => {});
+
       console.error(`[AUTH ERROR] Failed to dispatch password reset email to ${user.email}: ${emailResult?.error || 'Unknown error'}`);
       logger.error('Failed to dispatch password reset email to %s: %s', user.email, emailResult?.error || 'Unknown error');
       return res.status(503).json({
@@ -276,8 +315,11 @@ exports.forgotPassword = async (req, res, next) => {
       });
     }
 
-    console.log(`[SMTP SUCCESS] Password reset email sent successfully to ${user.email}`);
-    res.status(200).json({ success: true, message: 'Password reset link sent.' });
+    console.log(`[EMAIL SUCCESS] Password reset email sent successfully to ${user.email}`);
+    return res.status(200).json({
+      success: true,
+      message: 'If an account exists with this email address, password reset instructions have been sent.'
+    });
   } catch (err) {
     next(err);
   }
@@ -291,8 +333,17 @@ exports.resetPassword = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Token and new password are required' });
     }
 
+    const cleanPassword = String(password).trim();
+    if (cleanPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long' });
+    }
+
+    const cleanToken = String(token).trim();
+    const hashedToken = crypto.createHash('sha256').update(cleanToken).digest('hex');
+
+    // Query for either hashedToken (new) or raw token (backward compatibility) with valid expiry
     const user = await User.findOne({
-      resetPasswordToken: token,
+      resetPasswordToken: { $in: [hashedToken, cleanToken] },
       resetPasswordExpires: { $gt: Date.now() }
     });
 
@@ -301,9 +352,11 @@ exports.resetPassword = async (req, res, next) => {
     }
 
     const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
+    user.password = await bcrypt.hash(cleanPassword, salt);
+    // Invalidate reset token immediately (single-use guarantee)
     user.resetPasswordToken = '';
     user.resetPasswordExpires = null;
+    user.isVerified = true;
     await user.save();
 
     await ActivityLog.create({
@@ -313,7 +366,10 @@ exports.resetPassword = async (req, res, next) => {
       details: 'Password reset completed'
     });
 
-    res.status(200).json({ success: true, message: 'Password updated successfully. You can now log in.' });
+    return res.status(200).json({
+      success: true,
+      message: 'Password updated successfully. You can now log in with your new password.'
+    });
   } catch (err) {
     next(err);
   }
@@ -553,7 +609,117 @@ const findOrCreateSocialUser = async ({ provider, providerId, email, name, pictu
   return user;
 };
 
+// Short-lived memory store for single-use authorization exchange codes
+const authExchangeCodes = new Map();
+
+const storeAuthExchangeCode = async (code, data) => {
+  const expiresAt = Date.now() + 60000; // 60 seconds TTL
+  authExchangeCodes.set(code, { ...data, expiresAt });
+
+  try {
+    const redisClient = redis.getClient();
+    if (redis.isConnected() && redisClient) {
+      await redisClient.set(`auth_exchange:${code}`, JSON.stringify(data), { EX: 60 });
+    }
+  } catch (e) {
+    // Redis optional
+  }
+};
+
+const consumeAuthExchangeCode = async (code) => {
+  if (!code || typeof code !== 'string') return null;
+
+  try {
+    const redisClient = redis.getClient();
+    if (redis.isConnected() && redisClient) {
+      const redisData = await redisClient.get(`auth_exchange:${code}`);
+      if (redisData) {
+        await redisClient.del(`auth_exchange:${code}`);
+        authExchangeCodes.delete(code);
+        return JSON.parse(redisData);
+      }
+    }
+  } catch (e) {
+    // Fall back to memory
+  }
+
+  const memoryData = authExchangeCodes.get(code);
+  if (!memoryData) return null;
+
+  authExchangeCodes.delete(code); // single-use deletion
+
+  if (Date.now() > memoryData.expiresAt) {
+    return null; // Expired
+  }
+
+  return memoryData;
+};
+
+// Periodic memory store cleanup
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, val] of authExchangeCodes.entries()) {
+    if (now > val.expiresAt) {
+      authExchangeCodes.delete(code);
+    }
+  }
+}, 300000).unref();
+
+const getBackendBaseUrl = (req) => {
+  if (process.env.BACKEND_URL && process.env.BACKEND_URL.trim()) {
+    let url = process.env.BACKEND_URL.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `https://${url}`;
+    }
+    return url.replace(/\/+$/, '');
+  }
+  const host = req?.get('host');
+  const protocol = req?.protocol || 'https';
+  if (host) {
+    return `${protocol}://${host}`;
+  }
+  return 'https://intervexa-ai-backend-5w9c.onrender.com';
+};
+
+const getGoogleCallbackUrl = (req) => {
+  if (process.env.GOOGLE_CALLBACK_URL && process.env.GOOGLE_CALLBACK_URL.trim()) {
+    return process.env.GOOGLE_CALLBACK_URL.trim();
+  }
+  return `${getBackendBaseUrl(req)}/api/auth/google/callback`;
+};
+
+const getFacebookCallbackUrl = (req) => {
+  if (process.env.FACEBOOK_CALLBACK_URL && process.env.FACEBOOK_CALLBACK_URL.trim()) {
+    return process.env.FACEBOOK_CALLBACK_URL.trim();
+  }
+  return `${getBackendBaseUrl(req)}/api/auth/facebook/callback`;
+};
+
 // ---------------- Google OAuth ----------------
+
+exports.getGoogleAuthUrl = (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    return res.status(503).json({
+      success: false,
+      message: 'Google authentication is currently being configured on the server.'
+    });
+  }
+
+  const redirectUri = getGoogleCallbackUrl(req);
+  const state = crypto.randomBytes(16).toString('hex');
+
+  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${encodeURIComponent(clientId)}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `response_type=code&` +
+    `scope=${encodeURIComponent('openid email profile')}&` +
+    `state=${state}&` +
+    `access_type=online&` +
+    `prompt=select_account`;
+
+  return res.status(200).json({ success: true, url: googleAuthUrl });
+};
 
 exports.googleOAuthRedirect = (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -563,8 +729,7 @@ exports.googleOAuthRedirect = (req, res) => {
     return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Google authentication is currently being configured on the server. Please sign in with email and password.')}`);
   }
 
-  const backendBaseUrl = `${req.protocol}://${req.get('host')}`;
-  const redirectUri = `${backendBaseUrl}/api/auth/google/callback`;
+  const redirectUri = getGoogleCallbackUrl(req);
   const state = crypto.randomBytes(16).toString('hex');
 
   const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -589,8 +754,7 @@ exports.googleOAuthCallback = async (req, res) => {
   }
 
   try {
-    const backendBaseUrl = `${req.protocol}://${req.get('host')}`;
-    const redirectUri = `${backendBaseUrl}/api/auth/google/callback`;
+    const redirectUri = getGoogleCallbackUrl(req);
 
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -642,10 +806,55 @@ exports.googleOAuthCallback = async (req, res) => {
       details: 'Logged in via Google OAuth'
     });
 
-    res.redirect(`${frontendBaseUrl}/auth/callback?token=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}`);
+    // Generate single-use, 60s temporary authorization code to securely transfer session without exposing tokens in URL
+    const authCode = crypto.randomBytes(32).toString('hex');
+    await storeAuthExchangeCode(authCode, {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role?.name || user.role || 'candidate',
+        profileImage: user.profileImage,
+        isVerified: user.isVerified,
+        skills: user.skills,
+        experience: user.experience
+      }
+    });
+
+    res.redirect(`${frontendBaseUrl}/auth/callback?code=${encodeURIComponent(authCode)}`);
   } catch (err) {
     logger.error('Google OAuth callback error: %s', err.message);
     res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('An error occurred during Google sign-in. Please try again.')}`);
+  }
+};
+
+exports.exchangeAuthCode = async (req, res, next) => {
+  try {
+    const { code } = req.body;
+
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ success: false, message: 'Authorization code is required' });
+    }
+
+    const payload = await consumeAuthExchangeCode(code.trim());
+
+    if (!payload) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired authorization code. Please sign in again.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken,
+      user: payload.user
+    });
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -714,6 +923,28 @@ exports.googleTokenLogin = async (req, res, next) => {
 
 // ---------------- Facebook OAuth ----------------
 
+exports.getFacebookAuthUrl = (req, res) => {
+  const appId = process.env.FACEBOOK_APP_ID;
+  if (!appId) {
+    return res.status(503).json({
+      success: false,
+      message: 'Facebook authentication is currently being configured on the server.'
+    });
+  }
+
+  const redirectUri = getFacebookCallbackUrl(req);
+  const state = crypto.randomBytes(16).toString('hex');
+
+  const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?` +
+    `client_id=${encodeURIComponent(appId)}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `state=${state}&` +
+    `scope=${encodeURIComponent('email,public_profile')}&` +
+    `response_type=code`;
+
+  return res.status(200).json({ success: true, url: fbAuthUrl });
+};
+
 exports.facebookOAuthRedirect = (req, res) => {
   const appId = process.env.FACEBOOK_APP_ID;
   const frontendBaseUrl = getFrontendBaseUrl(req);
@@ -722,8 +953,7 @@ exports.facebookOAuthRedirect = (req, res) => {
     return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Facebook authentication is currently being configured on the server. Please sign in with email and password.')}`);
   }
 
-  const backendBaseUrl = `${req.protocol}://${req.get('host')}`;
-  const redirectUri = `${backendBaseUrl}/api/auth/facebook/callback`;
+  const redirectUri = getFacebookCallbackUrl(req);
   const state = crypto.randomBytes(16).toString('hex');
 
   const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?` +
@@ -748,8 +978,7 @@ exports.facebookOAuthCallback = async (req, res) => {
   }
 
   try {
-    const backendBaseUrl = `${req.protocol}://${req.get('host')}`;
-    const redirectUri = `${backendBaseUrl}/api/auth/facebook/callback`;
+    const redirectUri = getFacebookCallbackUrl(req);
 
     const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?` +
       `client_id=${encodeURIComponent(process.env.FACEBOOK_APP_ID)}&` +
@@ -798,7 +1027,24 @@ exports.facebookOAuthCallback = async (req, res) => {
       details: 'Logged in via Facebook OAuth'
     });
 
-    res.redirect(`${frontendBaseUrl}/auth/callback?token=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}`);
+    // Generate single-use, 60s temporary authorization code to securely transfer session without exposing tokens in URL
+    const authCode = crypto.randomBytes(32).toString('hex');
+    await storeAuthExchangeCode(authCode, {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role?.name || user.role || 'candidate',
+        profileImage: user.profileImage,
+        isVerified: user.isVerified,
+        skills: user.skills,
+        experience: user.experience
+      }
+    });
+
+    res.redirect(`${frontendBaseUrl}/auth/callback?code=${encodeURIComponent(authCode)}`);
   } catch (err) {
     logger.error('Facebook OAuth callback error: %s', err.message);
     res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('An error occurred during Facebook sign-in. Please try again.')}`);

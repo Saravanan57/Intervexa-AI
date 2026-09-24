@@ -77,6 +77,21 @@ export class AuthService {
     return this.getMe();
   }
 
+  exchangeAuthCode(code: string): Observable<any> {
+    return this.http.post<any>(`${this.apiUrl}/exchange-code`, { code }).pipe(
+      tap((res) => {
+        if (res.success && res.accessToken) {
+          localStorage.setItem('accessToken', res.accessToken);
+          localStorage.setItem('refreshToken', res.refreshToken);
+          if (res.user) {
+            localStorage.setItem('user', JSON.stringify(res.user));
+            this.currentUser.set(res.user);
+          }
+        }
+      })
+    );
+  }
+
   getGoogleAuthUrl(): string {
     return `${this.apiUrl}/google`;
   }
@@ -86,11 +101,33 @@ export class AuthService {
   }
 
   loginWithGoogleRedirect() {
-    window.location.href = this.getGoogleAuthUrl();
+    this.http.get<{ success: boolean; url: string }>(`${this.apiUrl}/google/url`).subscribe({
+      next: (res) => {
+        if (res && res.success && res.url) {
+          window.location.href = res.url;
+        } else {
+          window.location.href = this.getGoogleAuthUrl();
+        }
+      },
+      error: () => {
+        window.location.href = this.getGoogleAuthUrl();
+      }
+    });
   }
 
   loginWithFacebookRedirect() {
-    window.location.href = this.getFacebookAuthUrl();
+    this.http.get<{ success: boolean; url: string }>(`${this.apiUrl}/facebook/url`).subscribe({
+      next: (res) => {
+        if (res && res.success && res.url) {
+          window.location.href = res.url;
+        } else {
+          window.location.href = this.getFacebookAuthUrl();
+        }
+      },
+      error: () => {
+        window.location.href = this.getFacebookAuthUrl();
+      }
+    });
   }
 
   googleTokenLogin(token: string): Observable<AuthResponse> {
