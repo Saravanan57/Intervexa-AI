@@ -313,15 +313,20 @@ exports.forgotPassword = async (req, res, next) => {
       user.resetPasswordExpires = null;
       await user.save().catch(() => {});
 
-      console.error(`[AUTH ERROR] Failed to dispatch password reset email to ${user.email}: ${emailResult?.error || 'Unknown error'}`);
-      logger.error('Failed to dispatch password reset email to %s: %s', user.email, emailResult?.error || 'Unknown error');
+      const failureCategory = emailResult?.category || 'NETWORK_OR_API_ERROR';
+      const provider = emailResult?.provider || 'unknown';
+      const safeDomain = cleanEmail.includes('@') ? cleanEmail.split('@')[1] : 'unknown';
+
+      console.error(`[AUTH FORGOT-PASSWORD FAILURE] Category: ${failureCategory} | Provider: ${provider} | Recipient domain: @${safeDomain} | Error: ${emailResult?.error || 'Unknown failure'}${emailResult?.notice ? ` | Notice: ${emailResult.notice}` : ''}`);
+      logger.error('Failed to dispatch password reset email to domain @%s: %s (Category: %s, Provider: %s)', safeDomain, emailResult?.error || 'Unknown error', failureCategory, provider);
       return res.status(503).json({
         success: false,
         message: 'Unable to send password reset email at this time. Please try again later or contact support.'
       });
     }
 
-    console.log(`[EMAIL SUCCESS] Password reset email sent successfully to ${user.email}`);
+    const safeDomain = cleanEmail.includes('@') ? cleanEmail.split('@')[1] : 'unknown';
+    console.log(`[AUTH FORGOT-PASSWORD SUCCESS] Password reset instructions dispatched successfully via ${emailResult?.provider || 'active provider'} to recipient @${safeDomain}`);
     return res.status(200).json({
       success: true,
       message: 'If an account exists with this email address, password reset instructions have been sent.'

@@ -4,19 +4,48 @@ const logger = require('../utils/logger');
 let cachedTransporter = null;
 
 /**
- * Checks whether an HTTP-based email provider (Resend, Brevo, SendGrid) is configured
+ * Categorized error constants for clear diagnostics
+ */
+const EMAIL_ERROR_CATEGORIES = {
+  MISSING_EMAIL_PROVIDER: 'MISSING_EMAIL_PROVIDER',
+  INVALID_PROVIDER_CONFIGURATION: 'INVALID_PROVIDER_CONFIGURATION',
+  INVALID_SENDER_CONFIGURATION: 'INVALID_SENDER_CONFIGURATION',
+  PROVIDER_API_REJECTED: 'PROVIDER_API_REJECTED',
+  SMTP_PORT_BLOCKED_BY_HOST: 'SMTP_PORT_BLOCKED_BY_HOST',
+  SMTP_AUTHENTICATION_FAILED: 'SMTP_AUTHENTICATION_FAILED',
+  NETWORK_OR_API_ERROR: 'NETWORK_OR_API_ERROR'
+};
+
+/**
+ * Checks whether an HTTP-based email provider is configured
  */
 const getHttpApiProvider = () => {
   if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()) {
     return 'resend';
   }
-  if (process.env.BREVO_API_KEY && process.env.BREVO_API_KEY.trim()) {
+  if ((process.env.BREVO_API_KEY && process.env.BREVO_API_KEY.trim()) || 
+      (process.env.SENDINBLUE_API_KEY && process.env.SENDINBLUE_API_KEY.trim())) {
     return 'brevo';
   }
   if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_API_KEY.trim()) {
     return 'sendgrid';
   }
+  if ((process.env.POSTMARK_SERVER_TOKEN && process.env.POSTMARK_SERVER_TOKEN.trim()) ||
+      (process.env.POSTMARK_API_KEY && process.env.POSTMARK_API_KEY.trim())) {
+    return 'postmark';
+  }
   return null;
+};
+
+/**
+ * Checks whether the service is running on Render
+ */
+const isRenderEnvironment = () => {
+  return Boolean(
+    process.env.RENDER ||
+    process.env.RENDER_SERVICE_ID ||
+    (process.env.BACKEND_URL && process.env.BACKEND_URL.includes('onrender.com'))
+  );
 };
 
 /**
@@ -67,6 +96,23 @@ const isGmailService = () => {
 };
 
 /**
+ * Checks if an email address belongs to a free consumer webmail service
+ */
+const isWebmailAddress = (emailStr) => {
+  if (!emailStr || typeof emailStr !== 'string') return false;
+  const lower = emailStr.toLowerCase();
+  return (
+    lower.includes('@gmail.com') ||
+    lower.includes('@googlemail.com') ||
+    lower.includes('@yahoo.com') ||
+    lower.includes('@hotmail.com') ||
+    lower.includes('@outlook.com') ||
+    lower.includes('@live.com') ||
+    lower.includes('@icloud.com')
+  );
+};
+
+/**
  * Resolves the sender display name and email address safely
  */
 const getFromAddress = () => {
@@ -97,6 +143,15 @@ const getPureFromEmail = () => {
     return match[1].trim();
   }
   return fullFrom.replace(/"/g, '').trim();
+};
+
+/**
+ * Extracts safe recipient domain for logging without exposing PII
+ */
+const getSafeRecipientDomain = (to) => {
+  if (Array.isArray(to)) to = to[0];
+  if (!to || typeof to !== 'string' || !to.includes('@')) return 'unknown';
+  return to.split('@')[1] || 'unknown';
 };
 
 /**
@@ -193,69 +248,120 @@ let lastSendResult = null;
  */
 const sendViaResend = async ({ to, subject, html, text }) => {
   const apiKey = (process.env.RESEND_API_KEY || '').trim();
-  let from = (process.env.RESEND_FROM || process.env.SMTP_FROM || '').trim();
+  let from = (process.env.RESEND_FROM || '').trim();
 
-  // If from is empty or set to personal gmail, Resend requires onboarding@resend.dev unless domain is verified
+  // If no explicit RESEND_FROM is set, check SMTP_FROM
   if (!from) {
+    const smtpFrom = (process.env.SMTP_FROM || '').trim();
+    // Resend rejects free webmail domains like @gmail.com with 403 unless verified
+    if (smtpFrom && !isWebmailAddress(smtpFrom)) {
+      from = smtpFrom;
+    } else {
+      from = 'Intervexa AI <onboarding@resend.dev>';
+    }
+  } else if (isWebmailAddress(from)) {
+    console.warn(`[EMAIL WARN] RESEND_FROM uses an unverified consumer webmail domain (${from}). Defaulting to "Intervexa AI <onboarding@resend.dev>" to prevent Resend rejection.`);
     from = 'Intervexa AI <onboarding@resend.dev>';
-  } else if (!from.includes('<') && from.includes('@')) {
+  }
+
+  if (!from.includes('<') && from.includes('@')) {
     from = `"Intervexa AI" <${from}>`;
   }
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      from,
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      html,
-      text
-    })
-  });
+  let response;
+  try {
+    response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from,
+        to: Array.isArray(to) ? to : [to],
+        subject,
+        html,
+        text
+      })
+    });
+  } catch (netErr) {
+    const err = new Error(netErr.message || 'Network connection to Resend API failed');
+    err.category = EMAIL_ERROR_CATEGORIES.NETWORK_OR_API_ERROR;
+    throw err;
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const errorMsg = data.message || `Resend API error (${response.status})`;
-    throw new Error(errorMsg);
+    let category = EMAIL_ERROR_CATEGORIES.PROVIDER_API_REJECTED;
+    if (response.status === 401 || response.status === 403) {
+      category = EMAIL_ERROR_CATEGORIES.INVALID_PROVIDER_CONFIGURATION;
+    } else if (response.status === 422) {
+      category = EMAIL_ERROR_CATEGORIES.INVALID_SENDER_CONFIGURATION;
+    }
+    const errorMsg = data.message || `Resend API rejected with HTTP ${response.status}`;
+    const err = new Error(errorMsg);
+    err.category = category;
+    err.statusCode = response.status;
+    throw err;
   }
 
-  return { success: true, messageId: data.id || 'resend-sent' };
+  return { success: true, messageId: data.id || 'resend-sent', provider: 'resend' };
 };
 
 /**
  * Dispatches email using Brevo REST API (HTTPS port 443, 300 free emails/day)
  */
 const sendViaBrevo = async ({ to, subject, html, text }) => {
-  const apiKey = (process.env.BREVO_API_KEY || '').trim();
-  const fromEmail = getPureFromEmail();
+  const apiKey = (process.env.BREVO_API_KEY || process.env.SENDINBLUE_API_KEY || '').trim();
+  let fromEmail = (process.env.BREVO_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
+  
+  if (fromEmail.includes('<') && fromEmail.includes('>')) {
+    const match = fromEmail.match(/<([^>]+)>/);
+    if (match && match[1]) fromEmail = match[1].trim();
+  }
+  if (!fromEmail || !fromEmail.includes('@')) {
+    fromEmail = 'mamthasaravanan7@gmail.com';
+  }
 
-  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: {
-      'api-key': apiKey,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    },
-    body: JSON.stringify({
-      sender: { name: 'Intervexa AI', email: fromEmail },
-      to: [{ email: to }],
-      subject,
-      htmlContent: html,
-      textContent: text
-    })
-  });
+  let response;
+  try {
+    response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        sender: { name: 'Intervexa AI', email: fromEmail },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+        textContent: text
+      })
+    });
+  } catch (netErr) {
+    const err = new Error(netErr.message || 'Network connection to Brevo API failed');
+    err.category = EMAIL_ERROR_CATEGORIES.NETWORK_OR_API_ERROR;
+    throw err;
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const errorMsg = data.message || `Brevo API error (${response.status})`;
-    throw new Error(errorMsg);
+    let category = EMAIL_ERROR_CATEGORIES.PROVIDER_API_REJECTED;
+    if (response.status === 401 || response.status === 403) {
+      category = EMAIL_ERROR_CATEGORIES.INVALID_PROVIDER_CONFIGURATION;
+    } else if (response.status === 400) {
+      category = EMAIL_ERROR_CATEGORIES.INVALID_SENDER_CONFIGURATION;
+    }
+    const errorMsg = data.message || `Brevo API rejected with HTTP ${response.status}`;
+    const err = new Error(errorMsg);
+    err.category = category;
+    err.statusCode = response.status;
+    throw err;
   }
 
-  return { success: true, messageId: data.messageId || 'brevo-sent' };
+  return { success: true, messageId: data.messageId || 'brevo-sent', provider: 'brevo' };
 };
 
 /**
@@ -263,31 +369,107 @@ const sendViaBrevo = async ({ to, subject, html, text }) => {
  */
 const sendViaSendGrid = async ({ to, subject, html, text }) => {
   const apiKey = (process.env.SENDGRID_API_KEY || '').trim();
-  const fromEmail = getPureFromEmail();
+  let fromEmail = (process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
 
-  const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: to }] }],
-      from: { email: fromEmail, name: 'Intervexa AI' },
-      subject,
-      content: [
-        { type: 'text/plain', value: text },
-        { type: 'text/html', value: html }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`SendGrid API error (${response.status}): ${errorText}`);
+  if (fromEmail.includes('<') && fromEmail.includes('>')) {
+    const match = fromEmail.match(/<([^>]+)>/);
+    if (match && match[1]) fromEmail = match[1].trim();
+  }
+  if (!fromEmail || !fromEmail.includes('@')) {
+    fromEmail = 'mamthasaravanan7@gmail.com';
   }
 
-  return { success: true, messageId: 'sendgrid-sent' };
+  let response;
+  try {
+    response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: fromEmail, name: 'Intervexa AI' },
+        subject,
+        content: [
+          { type: 'text/plain', value: text },
+          { type: 'text/html', value: html }
+        ]
+      })
+    });
+  } catch (netErr) {
+    const err = new Error(netErr.message || 'Network connection to SendGrid API failed');
+    err.category = EMAIL_ERROR_CATEGORIES.NETWORK_OR_API_ERROR;
+    throw err;
+  }
+
+  if (!response.ok) {
+    let category = EMAIL_ERROR_CATEGORIES.PROVIDER_API_REJECTED;
+    if (response.status === 401 || response.status === 403) {
+      category = EMAIL_ERROR_CATEGORIES.INVALID_PROVIDER_CONFIGURATION;
+    }
+    const errorText = await response.text().catch(() => '');
+    let parsedMsg;
+    try {
+      const parsed = JSON.parse(errorText);
+      parsedMsg = parsed.errors?.map(e => e.message).join('; ');
+    } catch (_) {
+      parsedMsg = errorText;
+    }
+    const errorMsg = parsedMsg || `SendGrid API rejected with HTTP ${response.status}`;
+    const err = new Error(errorMsg);
+    err.category = category;
+    err.statusCode = response.status;
+    throw err;
+  }
+
+  return { success: true, messageId: 'sendgrid-sent', provider: 'sendgrid' };
+};
+
+/**
+ * Dispatches email using Postmark REST API (HTTPS port 443)
+ */
+const sendViaPostmark = async ({ to, subject, html, text }) => {
+  const token = (process.env.POSTMARK_SERVER_TOKEN || process.env.POSTMARK_API_KEY || '').trim();
+  const fromEmail = getPureFromEmail();
+
+  let response;
+  try {
+    response = await fetch('https://api.postmarkapp.com/email', {
+      method: 'POST',
+      headers: {
+        'X-Postmark-Server-Token': token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        From: fromEmail,
+        To: to,
+        Subject: subject,
+        HtmlBody: html,
+        TextBody: text
+      })
+    });
+  } catch (netErr) {
+    const err = new Error(netErr.message || 'Network connection to Postmark API failed');
+    err.category = EMAIL_ERROR_CATEGORIES.NETWORK_OR_API_ERROR;
+    throw err;
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    let category = EMAIL_ERROR_CATEGORIES.PROVIDER_API_REJECTED;
+    if (response.status === 401 || response.status === 422) {
+      category = EMAIL_ERROR_CATEGORIES.INVALID_PROVIDER_CONFIGURATION;
+    }
+    const errorMsg = data.Message || `Postmark API rejected with HTTP ${response.status}`;
+    const err = new Error(errorMsg);
+    err.category = category;
+    err.statusCode = response.status;
+    throw err;
+  }
+
+  return { success: true, messageId: data.MessageID || 'postmark-sent', provider: 'postmark' };
 };
 
 /**
@@ -310,7 +492,8 @@ const verifyTransporterConnection = async () => {
     lastVerificationResult = {
       configured: false,
       connected: false,
-      message: 'SMTP credentials not configured',
+      category: EMAIL_ERROR_CATEGORIES.MISSING_EMAIL_PROVIDER,
+      message: 'Email provider credentials not configured',
       timestamp: new Date().toISOString()
     };
     return lastVerificationResult;
@@ -330,14 +513,22 @@ const verifyTransporterConnection = async () => {
   } catch (err) {
     resetTransporterCache();
     const isTimeout = err.code === 'ETIMEDOUT' || (err.message && err.message.toLowerCase().includes('timeout'));
-    const notice = isTimeout
-      ? 'Render free tier web services block outbound SMTP ports (25, 465, 587). To send emails reliably on Render, set RESEND_API_KEY or BREVO_API_KEY (HTTP API over port 443), or upgrade to a Render paid plan.'
-      : undefined;
+    const isAuthFail = err.responseCode === 535 || (err.message && err.message.toLowerCase().includes('badcredentials'));
+    
+    let category = EMAIL_ERROR_CATEGORIES.NETWORK_OR_API_ERROR;
+    let notice;
+
+    if (isTimeout) {
+      category = EMAIL_ERROR_CATEGORIES.SMTP_PORT_BLOCKED_BY_HOST;
+      notice = 'Render free tier web services block outbound SMTP ports (25, 465, 587). Configure RESEND_API_KEY or BREVO_API_KEY (HTTP API over port 443) in Render environment variables.';
+    } else if (isAuthFail) {
+      category = EMAIL_ERROR_CATEGORIES.SMTP_AUTHENTICATION_FAILED;
+      notice = 'SMTP authentication failed. Check SMTP_USER and SMTP_PASS (Gmail requires a 16-character App Password).';
+    }
 
     const safeError = {
-      name: err.name,
+      category,
       code: err.code,
-      command: err.command,
       responseCode: err.responseCode,
       message: err.message,
       notice
@@ -346,6 +537,7 @@ const verifyTransporterConnection = async () => {
     lastVerificationResult = {
       configured: true,
       connected: false,
+      category,
       provider: isGmailService() ? 'gmail' : 'custom_smtp',
       message: err.message,
       code: err.code,
@@ -366,6 +558,7 @@ const getSafeStatus = () => {
   const rawUser = (process.env.SMTP_USER || '').trim();
   const rawHost = (process.env.SMTP_HOST || '').trim();
   const isGmail = isGmailService();
+  const onRender = isRenderEnvironment();
 
   let providerName = 'not_configured';
   if (apiProvider) {
@@ -381,9 +574,11 @@ const getSafeStatus = () => {
   return {
     configured,
     provider: providerName,
+    isRenderHost: onRender,
     hasResendApiKey: Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()),
-    hasBrevoApiKey: Boolean(process.env.BREVO_API_KEY && process.env.BREVO_API_KEY.trim()),
+    hasBrevoApiKey: Boolean((process.env.BREVO_API_KEY && process.env.BREVO_API_KEY.trim()) || (process.env.SENDINBLUE_API_KEY && process.env.SENDINBLUE_API_KEY.trim())),
     hasSendGridApiKey: Boolean(process.env.SENDGRID_API_KEY && process.env.SENDGRID_API_KEY.trim()),
+    hasPostmarkApiKey: Boolean((process.env.POSTMARK_SERVER_TOKEN && process.env.POSTMARK_SERVER_TOKEN.trim()) || (process.env.POSTMARK_API_KEY && process.env.POSTMARK_API_KEY.trim())),
     resolvedHost: isGmail ? 'smtp.gmail.com' : (rawHost && !rawHost.includes('@') ? rawHost : 'smtp.gmail.com'),
     hasUser: !!(rawUser && rawUser !== 'mock_user' && rawUser !== 'your_smtp_user'),
     hasPass: !!(process.env.SMTP_PASS && process.env.SMTP_PASS !== 'mock_pass' && process.env.SMTP_PASS !== 'your_smtp_password'),
@@ -393,7 +588,9 @@ const getSafeStatus = () => {
     fromAddress: getFromAddress(),
     lastVerification: lastVerificationResult,
     lastSendResult: lastSendResult,
-    platformNotice: 'Render free tier web services block outbound SMTP ports (25, 465, 587). Use RESEND_API_KEY or BREVO_API_KEY for HTTP API delivery, or upgrade Render plan.'
+    outboundSmtpBlockedNotice: (onRender && !apiProvider)
+      ? 'Render free tier web services block outbound SMTP ports (25, 465, 587). Please configure RESEND_API_KEY or BREVO_API_KEY in Render environment variables to send emails via HTTP API (HTTPS port 443).'
+      : null
   };
 };
 
@@ -402,59 +599,87 @@ const getSafeStatus = () => {
  */
 const sendEmail = async ({ to, subject, html, text }) => {
   const apiProvider = getHttpApiProvider();
+  const safeRecipientDomain = getSafeRecipientDomain(to);
 
-  // 1. Priority: HTTP API (Resend, Brevo, SendGrid) over HTTPS port 443 (immune to Render SMTP port block)
+  // 1. Priority: HTTP API (Resend, Brevo, SendGrid, Postmark) over HTTPS port 443 (immune to Render SMTP port block)
   if (apiProvider === 'resend') {
     try {
-      console.log(`[EMAIL] Dispatching email to ${to} via Resend HTTP API...`);
+      console.log(`[EMAIL] Dispatching email to @${safeRecipientDomain} via Resend HTTP API...`);
       const result = await sendViaResend({ to, subject, html, text });
-      console.log(`[EMAIL SUCCESS] Email delivered via Resend to ${to} (ID: ${result.messageId})`);
-      lastSendResult = { success: true, to, provider: 'resend', timestamp: new Date().toISOString() };
+      console.log(`[EMAIL SUCCESS] Email delivered via Resend to @${safeRecipientDomain} (ID: ${result.messageId})`);
+      lastSendResult = { success: true, provider: 'resend', timestamp: new Date().toISOString() };
       return result;
     } catch (err) {
-      console.error('[EMAIL ERROR] Resend dispatch failed:', err.message);
-      logger.error('Resend email dispatch failed to %s: %s', to, err.message);
-      lastSendResult = { success: false, to, provider: 'resend', error: err.message, timestamp: new Date().toISOString() };
-      return { success: false, error: err.message };
+      const category = err.category || EMAIL_ERROR_CATEGORIES.PROVIDER_API_REJECTED;
+      console.error(`[EMAIL ERROR] Category: ${category} | Provider: resend | Domain: @${safeRecipientDomain} | Error: ${err.message}`);
+      logger.error('Resend email dispatch failed to domain @%s: %s (Category: %s)', safeRecipientDomain, err.message, category);
+      lastSendResult = { success: false, category, provider: 'resend', error: err.message, timestamp: new Date().toISOString() };
+      return { success: false, category, provider: 'resend', error: err.message };
     }
   }
 
   if (apiProvider === 'brevo') {
     try {
-      console.log(`[EMAIL] Dispatching email to ${to} via Brevo HTTP API...`);
+      console.log(`[EMAIL] Dispatching email to @${safeRecipientDomain} via Brevo HTTP API...`);
       const result = await sendViaBrevo({ to, subject, html, text });
-      console.log(`[EMAIL SUCCESS] Email delivered via Brevo to ${to} (ID: ${result.messageId})`);
-      lastSendResult = { success: true, to, provider: 'brevo', timestamp: new Date().toISOString() };
+      console.log(`[EMAIL SUCCESS] Email delivered via Brevo to @${safeRecipientDomain} (ID: ${result.messageId})`);
+      lastSendResult = { success: true, provider: 'brevo', timestamp: new Date().toISOString() };
       return result;
     } catch (err) {
-      console.error('[EMAIL ERROR] Brevo dispatch failed:', err.message);
-      logger.error('Brevo email dispatch failed to %s: %s', to, err.message);
-      lastSendResult = { success: false, to, provider: 'brevo', error: err.message, timestamp: new Date().toISOString() };
-      return { success: false, error: err.message };
+      const category = err.category || EMAIL_ERROR_CATEGORIES.PROVIDER_API_REJECTED;
+      console.error(`[EMAIL ERROR] Category: ${category} | Provider: brevo | Domain: @${safeRecipientDomain} | Error: ${err.message}`);
+      logger.error('Brevo email dispatch failed to domain @%s: %s (Category: %s)', safeRecipientDomain, err.message, category);
+      lastSendResult = { success: false, category, provider: 'brevo', error: err.message, timestamp: new Date().toISOString() };
+      return { success: false, category, provider: 'brevo', error: err.message };
     }
   }
 
   if (apiProvider === 'sendgrid') {
     try {
-      console.log(`[EMAIL] Dispatching email to ${to} via SendGrid HTTP API...`);
+      console.log(`[EMAIL] Dispatching email to @${safeRecipientDomain} via SendGrid HTTP API...`);
       const result = await sendViaSendGrid({ to, subject, html, text });
-      console.log(`[EMAIL SUCCESS] Email delivered via SendGrid to ${to}`);
-      lastSendResult = { success: true, to, provider: 'sendgrid', timestamp: new Date().toISOString() };
+      console.log(`[EMAIL SUCCESS] Email delivered via SendGrid to @${safeRecipientDomain}`);
+      lastSendResult = { success: true, provider: 'sendgrid', timestamp: new Date().toISOString() };
       return result;
     } catch (err) {
-      console.error('[EMAIL ERROR] SendGrid dispatch failed:', err.message);
-      logger.error('SendGrid email dispatch failed to %s: %s', to, err.message);
-      lastSendResult = { success: false, to, provider: 'sendgrid', error: err.message, timestamp: new Date().toISOString() };
-      return { success: false, error: err.message };
+      const category = err.category || EMAIL_ERROR_CATEGORIES.PROVIDER_API_REJECTED;
+      console.error(`[EMAIL ERROR] Category: ${category} | Provider: sendgrid | Domain: @${safeRecipientDomain} | Error: ${err.message}`);
+      logger.error('SendGrid email dispatch failed to domain @%s: %s (Category: %s)', safeRecipientDomain, err.message, category);
+      lastSendResult = { success: false, category, provider: 'sendgrid', error: err.message, timestamp: new Date().toISOString() };
+      return { success: false, category, provider: 'sendgrid', error: err.message };
+    }
+  }
+
+  if (apiProvider === 'postmark') {
+    try {
+      console.log(`[EMAIL] Dispatching email to @${safeRecipientDomain} via Postmark HTTP API...`);
+      const result = await sendViaPostmark({ to, subject, html, text });
+      console.log(`[EMAIL SUCCESS] Email delivered via Postmark to @${safeRecipientDomain}`);
+      lastSendResult = { success: true, provider: 'postmark', timestamp: new Date().toISOString() };
+      return result;
+    } catch (err) {
+      const category = err.category || EMAIL_ERROR_CATEGORIES.PROVIDER_API_REJECTED;
+      console.error(`[EMAIL ERROR] Category: ${category} | Provider: postmark | Domain: @${safeRecipientDomain} | Error: ${err.message}`);
+      logger.error('Postmark email dispatch failed to domain @%s: %s (Category: %s)', safeRecipientDomain, err.message, category);
+      lastSendResult = { success: false, category, provider: 'postmark', error: err.message, timestamp: new Date().toISOString() };
+      return { success: false, category, provider: 'postmark', error: err.message };
     }
   }
 
   // 2. SMTP fallback
   if (!isSmtpConfigured()) {
-    console.warn(`[SMTP WARN] SMTP is not configured with active credentials on this server. Real email cannot be delivered to: ${to}`);
+    const category = EMAIL_ERROR_CATEGORIES.MISSING_EMAIL_PROVIDER;
+    const errorMsg = isRenderEnvironment()
+      ? 'No email API provider configured. Render free tier blocks outbound SMTP ports (25, 465, 587). Please configure RESEND_API_KEY or BREVO_API_KEY in Render environment variables.'
+      : 'Email delivery service is not configured on this server.';
+
+    console.warn(`[EMAIL WARN] Category: ${category} | ${errorMsg}`);
+    logger.warn('Email send aborted: %s (Category: %s)', errorMsg, category);
     return {
       success: false,
-      error: 'SMTP service is not configured on this server.'
+      category,
+      provider: 'none',
+      error: errorMsg
     };
   }
 
@@ -468,45 +693,51 @@ const sendEmail = async ({ to, subject, html, text }) => {
   };
 
   const isGmail = isGmailService();
+  const activeSmtpProvider = isGmail ? 'gmail' : 'custom_smtp';
 
   // Primary SMTP attempt
   try {
     const transporter = getTransporter();
     if (!transporter) {
+      const category = EMAIL_ERROR_CATEGORIES.INVALID_PROVIDER_CONFIGURATION;
       return {
         success: false,
+        category,
+        provider: activeSmtpProvider,
         error: 'Unable to initialize email transporter.'
       };
     }
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`[SMTP SUCCESS] Email delivered to ${to} (Message ID: ${info.messageId})`);
-    lastSendResult = { success: true, to, timestamp: new Date().toISOString() };
+    console.log(`[SMTP SUCCESS] Email delivered to @${safeRecipientDomain} (Message ID: ${info.messageId})`);
+    lastSendResult = { success: true, provider: activeSmtpProvider, timestamp: new Date().toISOString() };
     return {
       success: true,
+      provider: activeSmtpProvider,
       messageId: info.messageId
     };
   } catch (primaryErr) {
     resetTransporterCache();
 
-    // If Gmail and port or connection failed, attempt alternate port fallback
+    // If Gmail and connection failed, attempt alternate port fallback
     if (isGmail) {
-      console.warn(`[SMTP WARN] Primary Gmail delivery to ${to} failed (${primaryErr.code || primaryErr.message}). Attempting alternate port fallback...`);
+      console.warn(`[SMTP WARN] Primary Gmail delivery to @${safeRecipientDomain} failed (${primaryErr.code || primaryErr.message}). Attempting alternate port fallback...`);
       try {
         const fallbackConfig = buildTransporterConfig(true);
         const fallbackTransporter = nodemailer.createTransport(fallbackConfig);
         const info = await fallbackTransporter.sendMail(mailOptions);
         
         cachedTransporter = fallbackTransporter;
-        console.log(`[SMTP SUCCESS] Email delivered via alternate Gmail configuration to ${to} (Message ID: ${info.messageId})`);
-        lastSendResult = { success: true, to, fallbackUsed: true, timestamp: new Date().toISOString() };
+        console.log(`[SMTP SUCCESS] Email delivered via alternate Gmail configuration to @${safeRecipientDomain} (Message ID: ${info.messageId})`);
+        lastSendResult = { success: true, provider: 'gmail_fallback', timestamp: new Date().toISOString() };
         return {
           success: true,
+          provider: 'gmail_fallback',
           messageId: info.messageId
         };
       } catch (fallbackErr) {
         resetTransporterCache();
-        console.error('[SMTP ERROR] Fallback delivery also failed:', {
+        console.error('[SMTP ERROR] Alternate Gmail port fallback delivery also failed:', {
           code: fallbackErr.code,
           command: fallbackErr.command,
           responseCode: fallbackErr.responseCode,
@@ -516,26 +747,36 @@ const sendEmail = async ({ to, subject, html, text }) => {
     }
 
     const isTimeout = primaryErr.code === 'ETIMEDOUT' || (primaryErr.message && primaryErr.message.toLowerCase().includes('timeout'));
-    const notice = isTimeout
-      ? 'Render free tier blocks SMTP ports 25, 465, and 587. Configure RESEND_API_KEY or BREVO_API_KEY to send emails via HTTP API (port 443), or upgrade Render plan.'
-      : undefined;
+    const isAuthFail = primaryErr.responseCode === 535 || (primaryErr.message && primaryErr.message.toLowerCase().includes('badcredentials'));
+
+    let category = EMAIL_ERROR_CATEGORIES.NETWORK_OR_API_ERROR;
+    let notice;
+
+    if (isTimeout) {
+      category = EMAIL_ERROR_CATEGORIES.SMTP_PORT_BLOCKED_BY_HOST;
+      notice = 'Render free tier web services block outbound SMTP ports (25, 465, 587). Configure RESEND_API_KEY or BREVO_API_KEY in Render dashboard environment variables to send emails via HTTP API (HTTPS port 443).';
+    } else if (isAuthFail) {
+      category = EMAIL_ERROR_CATEGORIES.SMTP_AUTHENTICATION_FAILED;
+      notice = 'SMTP authentication failed. Verify SMTP_USER and SMTP_PASS.';
+    }
 
     const safeDiagnostic = {
-      to,
-      name: primaryErr.name,
+      category,
+      provider: activeSmtpProvider,
+      recipientDomain: `@${safeRecipientDomain}`,
       code: primaryErr.code,
-      command: primaryErr.command,
       responseCode: primaryErr.responseCode,
       message: primaryErr.message,
       notice
     };
 
-    console.error('[SMTP ERROR] Nodemailer failed to send email:', safeDiagnostic);
-    logger.error('Nodemailer failed to send email to %s: %s (code: %s)', to, primaryErr.message, primaryErr.code || 'UNKNOWN');
+    console.error('[SMTP ERROR] Failed to send email:', safeDiagnostic);
+    logger.error('Nodemailer delivery failed for @%s: %s (Category: %s, code: %s)', safeRecipientDomain, primaryErr.message, category, primaryErr.code || 'UNKNOWN');
 
     lastSendResult = {
       success: false,
-      to,
+      category,
+      provider: activeSmtpProvider,
       code: primaryErr.code,
       responseCode: primaryErr.responseCode,
       message: primaryErr.message,
@@ -545,8 +786,11 @@ const sendEmail = async ({ to, subject, html, text }) => {
 
     return {
       success: false,
+      category,
+      provider: activeSmtpProvider,
       error: primaryErr.message,
-      code: primaryErr.code
+      code: primaryErr.code,
+      notice
     };
   }
 };
@@ -558,5 +802,6 @@ module.exports = {
   resetTransporterCache,
   verifyTransporterConnection,
   getSafeStatus,
-  getFromAddress
+  getFromAddress,
+  EMAIL_ERROR_CATEGORIES
 };
