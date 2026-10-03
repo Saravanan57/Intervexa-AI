@@ -96,10 +96,6 @@ export class AuthService {
     return `${this.apiUrl}/google`;
   }
 
-  getFacebookAuthUrl(): string {
-    return `${this.apiUrl}/facebook`;
-  }
-
   loginWithGoogleRedirect() {
     this.http.get<{ success: boolean; url: string }>(`${this.apiUrl}/google/url`).subscribe({
       next: (res) => {
@@ -115,29 +111,8 @@ export class AuthService {
     });
   }
 
-  loginWithFacebookRedirect() {
-    this.http.get<{ success: boolean; url: string }>(`${this.apiUrl}/facebook/url`).subscribe({
-      next: (res) => {
-        if (res && res.success && res.url) {
-          window.location.href = res.url;
-        } else {
-          window.location.href = this.getFacebookAuthUrl();
-        }
-      },
-      error: () => {
-        window.location.href = this.getFacebookAuthUrl();
-      }
-    });
-  }
-
   googleTokenLogin(token: string): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.apiUrl}/google`, { token }).pipe(
-      tap((res) => this.handleAuthSuccess(res))
-    );
-  }
-
-  facebookTokenLogin(accessToken: string, userID?: string): Observable<AuthResponse> {
-    return this.http.post<AuthResponse>(`${this.apiUrl}/facebook`, { accessToken, userID }).pipe(
       tap((res) => this.handleAuthSuccess(res))
     );
   }

@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, AbstractControl, ValidationErrors } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { CommonModule } from '@angular/common';
@@ -42,9 +42,16 @@ function passwordMatchValidator(control: AbstractControl): ValidationErrors | nu
             </div>
           </div>
         } @else if (errorMessage()) {
-          <div class="bg-error/10 border border-error/20 text-error text-xs rounded-xl p-3.5 mb-4 flex items-center">
-            <svg class="w-4 h-4 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-            <span>{{ errorMessage() }}</span>
+          <div class="bg-error/10 border border-error/20 text-error text-xs rounded-xl p-3.5 mb-4 space-y-2">
+            <div class="flex items-start space-x-2">
+              <svg class="w-4 h-4 text-error shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              <span>{{ errorMessage() }}</span>
+            </div>
+            @if (errorMessage()?.includes('expired') || errorMessage()?.includes('Invalid') || errorMessage()?.includes('token')) {
+              <div class="pt-1">
+                <a routerLink="/auth/forgot-password" class="font-bold text-primary hover:underline">Request a new reset link</a>
+              </div>
+            }
           </div>
         }
 
@@ -55,7 +62,7 @@ function passwordMatchValidator(control: AbstractControl): ValidationErrors | nu
               <span class="font-bold text-sm">{{ successMessage() }}</span>
             </div>
             <p class="text-slate-600">Redirecting to login page in 3 seconds...</p>
-            <a routerLink="/auth/login" class="inline-block px-4 py-2 bg-gradient-primary text-white font-bold rounded-lg text-xs hover:opacity-95">Go to Login Now</a>
+            <a routerLink="/auth/login" (click)="clearRedirectTimer()" class="inline-block px-4 py-2 bg-gradient-primary text-white font-bold rounded-lg text-xs hover:opacity-95">Go to Login Now</a>
           </div>
         } @else if (token()) {
           <form [formGroup]="resetForm" (ngSubmit)="onSubmit()" class="space-y-4">
@@ -82,7 +89,7 @@ function passwordMatchValidator(control: AbstractControl): ValidationErrors | nu
                 placeholder="••••••••" 
                 class="w-full bg-white border border-[#D9E2F1] rounded-xl px-4 py-3 text-sm text-[#111827] focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/5 transition-all"
               />
-              @if (resetForm.touched && resetForm.hasError('passwordMismatch')) {
+              @if ((resetForm.get('confirmPassword')?.touched || resetForm.touched) && resetForm.hasError('passwordMismatch')) {
                 <span class="text-[10px] text-error font-semibold">Passwords do not match. Please check again.</span>
               }
             </div>
@@ -91,7 +98,7 @@ function passwordMatchValidator(control: AbstractControl): ValidationErrors | nu
             <button 
               type="submit" 
               [disabled]="resetForm.invalid || isLoading()"
-              class="w-full py-3.5 rounded-xl bg-gradient-primary text-sm font-bold shadow-lg shadow-primary/20 hover:opacity-95 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none transition-all flex items-center justify-center space-x-2 text-white"
+              class="w-full py-3.5 rounded-xl bg-gradient-primary text-sm font-bold shadow-lg shadow-primary/20 hover:opacity-95 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none transition-all flex items-center justify-center space-x-2 text-white cursor-pointer"
             >
               @if (isLoading()) {
                 <span class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
@@ -105,13 +112,13 @@ function passwordMatchValidator(control: AbstractControl): ValidationErrors | nu
 
         <div class="text-center text-xs text-muted pt-4 mt-4 border-t border-[#D9E2F1]/50">
           <span>Need help? </span>
-          <a routerLink="/auth/login" class="font-extrabold text-primary hover:underline">Back to Login</a>
+          <a routerLink="/auth/login" (click)="clearRedirectTimer()" class="font-extrabold text-primary hover:underline">Back to Login</a>
         </div>
       </div>
     </div>
   `
 })
-export class ResetPasswordComponent implements OnInit {
+export class ResetPasswordComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private route = inject(ActivatedRoute);
@@ -122,6 +129,7 @@ export class ResetPasswordComponent implements OnInit {
   isLoading = signal(false);
   errorMessage = signal<string | null>(null);
   successMessage = signal<string | null>(null);
+  private redirectTimer: any = null;
 
   constructor() {
     this.resetForm = this.fb.group({
@@ -134,6 +142,17 @@ export class ResetPasswordComponent implements OnInit {
     this.route.queryParams.subscribe(params => {
       this.token.set(params['token'] || null);
     });
+  }
+
+  ngOnDestroy() {
+    this.clearRedirectTimer();
+  }
+
+  clearRedirectTimer() {
+    if (this.redirectTimer) {
+      clearTimeout(this.redirectTimer);
+      this.redirectTimer = null;
+    }
   }
 
   onSubmit() {
@@ -152,7 +171,8 @@ export class ResetPasswordComponent implements OnInit {
       next: (res) => {
         this.isLoading.set(false);
         this.successMessage.set(res.message || 'Password reset successfully! You can now log in.');
-        setTimeout(() => {
+        this.clearRedirectTimer();
+        this.redirectTimer = setTimeout(() => {
           this.router.navigate(['/auth/login']);
         }, 3000);
       },

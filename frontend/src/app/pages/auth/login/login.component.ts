@@ -47,7 +47,7 @@ import { AuthService } from '../../../core/services/auth.service';
           <div class="space-y-1.5">
             <div class="flex justify-between items-center">
               <label class="text-xs font-bold text-[#4B5563]">Password</label>
-              <a routerLink="/auth/forgot-password" class="text-xs font-bold text-primary hover:underline cursor-pointer">Forgot Password?</a>
+              <a [routerLink]="['/auth/forgot-password']" [queryParams]="loginForm.get('email')?.value ? { email: loginForm.get('email')?.value } : null" class="text-xs font-bold text-primary hover:underline cursor-pointer">Forgot Password?</a>
             </div>
             <input 
               type="password" 
@@ -106,23 +106,6 @@ import { AuthService } from '../../../core/services/auth.service';
               <span>Continue with Google</span>
             }
           </button>
-
-          <button 
-            type="button" 
-            (click)="loginWithFacebook()"
-            [disabled]="isSocialLoading() !== null || isLoading()"
-            class="w-full py-3 px-4 border border-[#D9E2F1] rounded-xl text-sm font-semibold text-[#374151] hover:bg-[#F9FAFB] active:bg-[#F3F4F6] transition-all flex items-center justify-center space-x-3 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
-          >
-            @if (isSocialLoading() === 'facebook') {
-              <span class="w-4 h-4 border-2 border-[#1877F2] border-t-transparent rounded-full animate-spin"></span>
-              <span>Connecting to Facebook...</span>
-            } @else {
-              <svg class="w-5 h-5 text-[#1877F2] shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-              </svg>
-              <span>Continue with Facebook</span>
-            }
-          </button>
         </div>
 
         <div class="text-center text-xs text-muted pt-4 mt-4 border-t border-[#D9E2F1]/50">
@@ -141,7 +124,7 @@ export class LoginComponent implements OnInit {
 
   loginForm: FormGroup;
   isLoading = signal(false);
-  isSocialLoading = signal<'google' | 'facebook' | null>(null);
+  isSocialLoading = signal<'google' | null>(null);
   errorMessage = signal<string | null>(null);
 
   constructor() {
@@ -156,6 +139,9 @@ export class LoginComponent implements OnInit {
       if (params['error']) {
         this.errorMessage.set(params['error']);
       }
+      if (params['email']) {
+        this.loginForm.patchValue({ email: params['email'] });
+      }
     });
   }
 
@@ -167,17 +153,6 @@ export class LoginComponent implements OnInit {
     } catch (err: any) {
       this.isSocialLoading.set(null);
       this.errorMessage.set('Unable to initiate Google sign-in. Please try again.');
-    }
-  }
-
-  loginWithFacebook() {
-    this.isSocialLoading.set('facebook');
-    this.errorMessage.set(null);
-    try {
-      this.authService.loginWithFacebookRedirect();
-    } catch (err: any) {
-      this.isSocialLoading.set(null);
-      this.errorMessage.set('Unable to initiate Facebook sign-in. Please try again.');
     }
   }
 

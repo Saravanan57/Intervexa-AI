@@ -118,8 +118,7 @@ const healthCheckHandler = (req, res) => {
     time: new Date(),
     emailService: getSafeStatus(),
     oauthService: {
-      hasGoogleAuth: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-      hasFacebookAuth: !!(process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET)
+      hasGoogleAuth: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
     }
   });
 };

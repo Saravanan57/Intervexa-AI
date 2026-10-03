@@ -139,7 +139,13 @@ exports.login = async (req, res, next) => {
     }
 
     if (!user.password) {
-      const providerName = user.authProvider === 'google' ? 'Google' : (user.authProvider === 'facebook' ? 'Facebook' : 'social login');
+      if (user.authProvider === 'facebook') {
+        return res.status(400).json({
+          success: false,
+          message: 'This account was originally registered with Facebook. Facebook sign-in has been removed. Please use "Forgot Password" to set a password for your account.'
+        });
+      }
+      const providerName = user.authProvider === 'google' ? 'Google' : 'social login';
       return res.status(400).json({
         success: false,
         message: `This account is registered with ${providerName}. Please use "Continue with ${providerName}" or use "Forgot Password" to set a password.`
@@ -537,7 +543,8 @@ exports.updateProfile = async (req, res, next) => {
 };
 
 /* ==========================================================================
-   SOCIAL AUTHENTICATION & ACCOUNT LINKING (GOOGLE & FACEBOOK)
+/* ==========================================================================
+   SOCIAL AUTHENTICATION & ACCOUNT LINKING (GOOGLE)
    ========================================================================== */
 
 /**
@@ -550,8 +557,6 @@ const findOrCreateSocialUser = async ({ provider, providerId, email, name, pictu
   let user = null;
   if (provider === 'google') {
     user = await User.findOne({ googleId: providerId }).populate('role');
-  } else if (provider === 'facebook') {
-    user = await User.findOne({ facebookId: providerId }).populate('role');
   }
 
   // 2. Safe account linking: Match existing user by verified email if not already linked
@@ -561,9 +566,6 @@ const findOrCreateSocialUser = async ({ provider, providerId, email, name, pictu
       let updated = false;
       if (provider === 'google' && !user.googleId) {
         user.googleId = providerId;
-        updated = true;
-      } else if (provider === 'facebook' && !user.facebookId) {
-        user.facebookId = providerId;
         updated = true;
       }
       if (!user.profileImage && picture) {
@@ -583,7 +585,7 @@ const findOrCreateSocialUser = async ({ provider, providerId, email, name, pictu
   // 3. New candidate registration if no account exists
   if (!user) {
     if (!cleanEmail) {
-      throw new Error(`Your ${provider === 'google' ? 'Google' : 'Facebook'} account did not share a verified email address. Email is required for registration.`);
+      throw new Error(`Your Google account did not share a verified email address. Email is required for registration.`);
     }
 
     const candidateRole = await Role.findOne({ name: 'candidate' });
@@ -592,12 +594,11 @@ const findOrCreateSocialUser = async ({ provider, providerId, email, name, pictu
     }
 
     user = await User.create({
-      name: name || (provider === 'google' ? 'Google Candidate' : 'Facebook Candidate'),
+      name: name || 'Google Candidate',
       email: cleanEmail,
       role: candidateRole._id,
       authProvider: provider,
       googleId: provider === 'google' ? providerId : '',
-      facebookId: provider === 'facebook' ? providerId : '',
       profileImage: picture || '',
       isVerified: Boolean(emailVerified),
       status: 'active'
@@ -688,12 +689,7 @@ const getGoogleCallbackUrl = (req) => {
   return `${getBackendBaseUrl(req)}/api/auth/google/callback`;
 };
 
-const getFacebookCallbackUrl = (req) => {
-  if (process.env.FACEBOOK_CALLBACK_URL && process.env.FACEBOOK_CALLBACK_URL.trim()) {
-    return process.env.FACEBOOK_CALLBACK_URL.trim();
-  }
-  return `${getBackendBaseUrl(req)}/api/auth/facebook/callback`;
-};
+
 
 // ---------------- Google OAuth ----------------
 
@@ -921,349 +917,5 @@ exports.googleTokenLogin = async (req, res, next) => {
   }
 };
 
-// ---------------- Facebook OAuth ----------------
 
-exports.getFacebookAuthUrl = (req, res) => {
-  const appId = process.env.FACEBOOK_APP_ID;
-  if (!appId) {
-    return res.status(503).json({
-      success: false,
-      message: 'Facebook authentication is currently being configured on the server.'
-    });
-  }
-
-  const redirectUri = getFacebookCallbackUrl(req);
-  const state = crypto.randomBytes(16).toString('hex');
-
-  const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?` +
-    `client_id=${encodeURIComponent(appId)}&` +
-    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-    `state=${state}&` +
-    `scope=${encodeURIComponent('email,public_profile')}&` +
-    `response_type=code`;
-
-  return res.status(200).json({ success: true, url: fbAuthUrl });
-};
-
-exports.facebookOAuthRedirect = (req, res) => {
-  const appId = process.env.FACEBOOK_APP_ID;
-  const frontendBaseUrl = getFrontendBaseUrl(req);
-
-  if (!appId) {
-    return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Facebook authentication is currently being configured on the server. Please sign in with email and password.')}`);
-  }
-
-  const redirectUri = getFacebookCallbackUrl(req);
-  const state = crypto.randomBytes(16).toString('hex');
-
-  const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?` +
-    `client_id=${encodeURIComponent(appId)}&` +
-    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-    `state=${state}&` +
-    `scope=${encodeURIComponent('email,public_profile')}&` +
-    `response_type=code`;
-
-  res.redirect(fbAuthUrl);
-};
-
-exports.facebookOAuthCallback = async (req, res) => {
-  const frontendBaseUrl = getFrontendBaseUrl(req);
-  const { code, error, error_reason } = req.query;
-
-  if (error || !code) {
-    const errorMsg = (error === 'access_denied' || error_reason === 'user_denied')
-      ? 'Facebook sign-in was cancelled.' 
-      : 'Unable to sign in with Facebook. Please try again.';
-    return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent(errorMsg)}`);
-  }
-
-  if (!process.env.FACEBOOK_APP_ID || !process.env.FACEBOOK_APP_SECRET) {
-    logger.error('Facebook OAuth callback called but FACEBOOK_APP_ID or FACEBOOK_APP_SECRET is not configured');
-    return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Facebook authentication is currently being configured on the server.')}`);
-  }
-
-  try {
-    const redirectUri = getFacebookCallbackUrl(req);
-
-    const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?` +
-      `client_id=${encodeURIComponent(process.env.FACEBOOK_APP_ID)}&` +
-      `client_secret=${encodeURIComponent(process.env.FACEBOOK_APP_SECRET)}&` +
-      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-      `code=${encodeURIComponent(code)}`;
-
-    const tokenRes = await fetch(tokenUrl);
-    const tokenData = await tokenRes.json();
-
-    if (!tokenRes.ok || !tokenData.access_token) {
-      logger.error('Facebook token exchange failed: %j', tokenData);
-      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Unable to authenticate with Facebook. Please try again.')}`);
-    }
-
-    const profileUrl = `https://graph.facebook.com/me?fields=id,name,email,picture.type(large)&access_token=${encodeURIComponent(tokenData.access_token)}`;
-    const profileRes = await fetch(profileUrl);
-    const profile = await profileRes.json();
-
-    if (!profileRes.ok || !profile.id) {
-      logger.error('Failed to retrieve Facebook profile: %j', profile);
-      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Unable to retrieve your Facebook profile.')}`);
-    }
-
-    const picture = profile.picture?.data?.url || '';
-
-    const user = await findOrCreateSocialUser({
-      provider: 'facebook',
-      providerId: profile.id,
-      email: profile.email,
-      name: profile.name,
-      picture,
-      emailVerified: Boolean(profile.email)
-    });
-
-    if (user.status !== 'active') {
-      return res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent('Your account is currently suspended.')}`);
-    }
-
-    const { accessToken, refreshToken } = generateTokens(user);
-
-    await ActivityLog.create({
-      user: user._id,
-      action: 'USER_LOGIN_FACEBOOK',
-      ipAddress: req.ip || '',
-      details: 'Logged in via Facebook OAuth'
-    });
-
-    // Generate single-use, 60s temporary authorization code to securely transfer session without exposing tokens in URL
-    const authCode = crypto.randomBytes(32).toString('hex');
-    await storeAuthExchangeCode(authCode, {
-      accessToken,
-      refreshToken,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role?.name || user.role || 'candidate',
-        profileImage: user.profileImage,
-        isVerified: user.isVerified,
-        skills: user.skills,
-        experience: user.experience
-      }
-    });
-
-    res.redirect(`${frontendBaseUrl}/auth/callback?code=${encodeURIComponent(authCode)}`);
-  } catch (err) {
-    logger.error('Facebook OAuth callback error: %s', err.message);
-    const clientMsg = (err.message && err.message.includes('verified email address'))
-      ? err.message
-      : 'An error occurred during Facebook sign-in. Please try again.';
-    res.redirect(`${frontendBaseUrl}/auth/login?error=${encodeURIComponent(clientMsg)}`);
-  }
-};
-
-exports.facebookTokenLogin = async (req, res, next) => {
-  try {
-    const { accessToken, userID } = req.body;
-    if (!accessToken) {
-      return res.status(400).json({ success: false, message: 'Facebook access token is required' });
-    }
-
-    const profileUrl = `https://graph.facebook.com/me?fields=id,name,email,picture.type(large)&access_token=${encodeURIComponent(accessToken)}`;
-    const profileRes = await fetch(profileUrl);
-    const profile = await profileRes.json();
-
-    if (!profileRes.ok || !profile.id) {
-      return res.status(401).json({ success: false, message: 'Invalid or expired Facebook access token' });
-    }
-
-    if (userID && profile.id !== userID) {
-      return res.status(401).json({ success: false, message: 'Facebook user ID mismatch' });
-    }
-
-    const picture = profile.picture?.data?.url || '';
-
-    const user = await findOrCreateSocialUser({
-      provider: 'facebook',
-      providerId: profile.id,
-      email: profile.email,
-      name: profile.name,
-      picture,
-      emailVerified: Boolean(profile.email)
-    });
-
-    if (user.status !== 'active') {
-      return res.status(403).json({ success: false, message: 'Your account is suspended' });
-    }
-
-    const { accessToken: appAccessToken, refreshToken } = generateTokens(user);
-
-    await ActivityLog.create({
-      user: user._id,
-      action: 'USER_LOGIN_FACEBOOK',
-      ipAddress: req.ip || '',
-      details: 'Logged in via Facebook Token'
-    });
-
-    res.status(200).json({
-      success: true,
-      message: 'Facebook login successful',
-      accessToken: appAccessToken,
-      refreshToken,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role.name,
-        profileImage: user.profileImage,
-        isVerified: user.isVerified,
-        skills: user.skills,
-        experience: user.experience
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-/**
- * Meta / Facebook User Data Deletion Callback
- * Required by Meta App Review & GDPR/data privacy guidelines.
- *
- * Receives signed_request from Meta when a user removes the app and requests data deletion.
- * Validates HMAC-SHA256 signature using FACEBOOK_APP_SECRET, extracts Facebook user_id,
- * locates the matching user, creates a unique confirmation tracking code,
- * and responds with status URL and confirmation code per Meta specification.
- */
-exports.facebookDataDeletionCallback = async (req, res, next) => {
-  try {
-    const signedRequest = req.body?.signed_request;
-
-    if (!signedRequest || typeof signedRequest !== 'string') {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing or invalid signed_request parameter'
-      });
-    }
-
-    const appSecret = process.env.FACEBOOK_APP_SECRET;
-    if (!appSecret) {
-      logger.error('Meta Data Deletion Callback called but FACEBOOK_APP_SECRET is not configured');
-      return res.status(503).json({
-        success: false,
-        message: 'Facebook data deletion service is currently unavailable.'
-      });
-    }
-
-    const parts = signedRequest.split('.');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid signed_request format. Expected <signature>.<payload>'
-      });
-    }
-
-    const [encodedSig, encodedPayload] = parts;
-
-    // Helper to safely decode base64url strings into Buffer
-    const decodeBase64Url = (input) => {
-      let base64 = input.replace(/-/g, '+').replace(/_/g, '/');
-      while (base64.length % 4) {
-        base64 += '=';
-      }
-      return Buffer.from(base64, 'base64');
-    };
-
-    let sigBuffer;
-    try {
-      sigBuffer = decodeBase64Url(encodedSig);
-    } catch (e) {
-      return res.status(400).json({
-        success: false,
-        message: 'Malformed signature encoding in signed_request'
-      });
-    }
-
-    const expectedSig = crypto
-      .createHmac('sha256', appSecret)
-      .update(encodedPayload)
-      .digest();
-
-    if (sigBuffer.length !== expectedSig.length || !crypto.timingSafeEqual(sigBuffer, expectedSig)) {
-      logger.warn('Meta signed_request signature verification failed');
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid signature in signed_request'
-      });
-    }
-
-    let payload;
-    try {
-      const decodedJson = decodeBase64Url(encodedPayload).toString('utf8');
-      payload = JSON.parse(decodedJson);
-    } catch (e) {
-      return res.status(400).json({
-        success: false,
-        message: 'Malformed payload in signed_request'
-      });
-    }
-
-    if (!payload || typeof payload !== 'object') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid payload data structure'
-      });
-    }
-
-    if (payload.algorithm && payload.algorithm.toUpperCase() !== 'HMAC-SHA256') {
-      return res.status(400).json({
-        success: false,
-        message: `Unsupported algorithm: ${payload.algorithm}. HMAC-SHA256 is required.`
-      });
-    }
-
-    const userId = payload.user_id;
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing user_id in signed_request payload'
-      });
-    }
-
-    // Lookup user by Facebook ID
-    const user = await User.findOne({ facebookId: userId });
-    logger.info('Meta User Data Deletion callback verified for Facebook user ID: %s (matched user: %s)', userId, user ? user._id : 'not_found');
-
-    // Generate unique deletion confirmation code for tracking
-    const confirmationCode = crypto.randomBytes(16).toString('hex');
-
-    // Log request if user exists for compliance auditing
-    if (user) {
-      try {
-        await ActivityLog.create({
-          user: user._id,
-          action: 'DATA_DELETION_REQUESTED',
-          ipAddress: req.ip || '',
-          details: `Meta data deletion requested with confirmation code ${confirmationCode}`
-        });
-      } catch (logErr) {
-        logger.error('Failed to log data deletion request activity: %s', logErr.message);
-      }
-    }
-
-    // NOTE: In compliance with data retention policies, the deletion acknowledgment
-    // is confirmed to Meta immediately. If automated scheduled purging is required,
-    // queue a background job here to purge/anonymize user profile, resumes, and interview records.
-    const frontendBaseUrl = (process.env.FRONTEND_URL && process.env.FRONTEND_URL.trim())
-      ? process.env.FRONTEND_URL.trim().replace(/\/+$/, '')
-      : 'https://intervexa-ai-sooty.vercel.app';
-
-    const statusUrl = `${frontendBaseUrl}/data-deletion-status?code=${confirmationCode}`;
-
-    return res.status(200).json({
-      url: statusUrl,
-      confirmation_code: confirmationCode
-    });
-  } catch (err) {
-    logger.error('Meta Data Deletion Callback error: %s', err.message);
-    next(err);
-  }
-};
 
