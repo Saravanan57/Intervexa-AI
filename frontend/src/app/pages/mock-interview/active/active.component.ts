@@ -4,6 +4,15 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { InterviewService } from '../../../core/services/interview.service';
 
+export type SpeechState =
+  | 'idle'
+  | 'speakingQuestion'
+  | 'releasingAudio'
+  | 'startingRecognition'
+  | 'listening'
+  | 'paused'
+  | 'processing';
+
 @Component({
   selector: 'app-active-interview',
   standalone: true,
@@ -369,10 +378,12 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
   isSynthesizing = signal(false);
   isStartingRecognition = signal(false);
   speechNotice = signal<string | null>(null);
+  speechState = signal<SpeechState>('idle');
 
   // Internal speech flags & timer refs
   private isRecognitionActive = false;
   private restartTimeout: any = null;
+  hadRecognitionError = false;
 
   // Checks
   hasMicPermission = signal(false);
@@ -411,8 +422,10 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     this.stopTimer();
     this.stopSpeechRecognition();
+    this.isRecording.set(false);
     this.interviewService.closeSocket();
     this.stopSpeechSynthesisSync();
+    this.speechState.set('idle');
     
     // Stop local video and audio streams
     if (this.audioStream) this.audioStream.getTracks().forEach(t => t.stop());
@@ -525,12 +538,28 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     });
   }
 
+  isAndroid(): boolean {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    return /Android/i.test(ua);
+  }
+
   isMobileDevice(): boolean {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
     const ua = navigator.userAgent || '';
     const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
     const isMobileUa = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
     return isMobileUa || (isTouch && window.innerWidth <= 820);
+  }
+
+  getAudioSettlingDelay(): number {
+    if (this.isAndroid()) {
+      return 750; // Android Chrome requires 500-1000ms for Google Speech Services / AudioTrack release
+    }
+    if (this.isMobileDevice()) {
+      return 450;
+    }
+    return 60; // Desktop Chrome can switch quickly
   }
 
   showSpeechNotice(msg: string) {
@@ -548,12 +577,15 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       } catch (e) {}
     }
     this.isSynthesizing.set(false);
+    if (this.speechState() === 'speakingQuestion') {
+      this.speechState.set('idle');
+    }
   }
 
   async stopSpeechSynthesis(): Promise<void> {
     this.stopSpeechSynthesisSync();
-    // On mobile devices, Google Speech Services / AudioTrack requires a cooldown to release the audio subsystem
-    const cooldownMs = this.isMobileDevice() ? 300 : 80;
+    // On mobile devices, especially Android, Google Speech Services / AudioTrack requires a cooldown to release the audio subsystem
+    const cooldownMs = this.getAudioSettlingDelay();
     await new Promise(resolve => setTimeout(resolve, cooldownMs));
   }
 
@@ -582,30 +614,40 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     const qText = this.currentQuestionText();
     if (!qText || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
 
-    // 1. Before reading question aloud, stop any active microphone SpeechRecognition cleanly
+    // 1. Stop any active microphone SpeechRecognition cleanly before reading question aloud
     this.stopSpeechRecognition();
     this.isRecording.set(false);
     this.isSpeechPaused.set(false);
 
     // 2. Cancel any pending or ongoing speech synthesis
     this.stopSpeechSynthesisSync();
+    this.speechState.set('speakingQuestion');
+    this.isSynthesizing.set(true);
+
     if (this.isMobileDevice()) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, this.isAndroid() ? 150 : 100));
     }
 
     const utterance = new SpeechSynthesisUtterance(qText);
     utterance.lang = 'en-US';
 
     utterance.onstart = () => {
+      this.speechState.set('speakingQuestion');
       this.isSynthesizing.set(true);
     };
 
     utterance.onend = () => {
       this.isSynthesizing.set(false);
+      if (this.speechState() === 'speakingQuestion') {
+        this.speechState.set('idle');
+      }
     };
 
     utterance.onerror = (e) => {
       this.isSynthesizing.set(false);
+      if (this.speechState() === 'speakingQuestion') {
+        this.speechState.set('idle');
+      }
       console.warn('Speech synthesis playback ended with notice/error:', e);
     };
 
@@ -613,6 +655,9 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       window.speechSynthesis.speak(utterance);
     } catch (err) {
       this.isSynthesizing.set(false);
+      if (this.speechState() === 'speakingQuestion') {
+        this.speechState.set('idle');
+      }
       console.warn('Failed to invoke speechSynthesis.speak:', err);
     }
   }
@@ -638,6 +683,8 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       this.isStartingRecognition.set(false);
       this.isRecording.set(true);
       this.isSpeechPaused.set(false);
+      this.speechState.set('listening');
+      this.hadRecognitionError = false;
       this.clearSpeechNotice();
     };
 
@@ -662,23 +709,36 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       this.isStartingRecognition.set(false);
       const error = event?.error;
       console.warn('[SPEECH RECOGNITION ERROR]:', error);
+      this.hadRecognitionError = true;
 
       if (error === 'not-allowed' || error === 'service-not-allowed') {
         this.stopSpeechRecognition();
         this.isRecording.set(false);
+        this.speechState.set('idle');
         this.showSpeechNotice('Microphone access was denied. Please allow microphone permissions in your browser to speak your answer.');
       } else if (error === 'audio-capture') {
         this.stopSpeechRecognition();
         this.isRecording.set(false);
-        this.showSpeechNotice('Microphone is busy or being used by another application. Please try again.');
+        this.speechState.set('idle');
+        this.showSpeechNotice('Microphone is busy or being used by another application. Please tap "Speak Answer" again to retry.');
       } else if (error === 'network') {
         this.stopSpeechRecognition();
         this.isRecording.set(false);
+        this.speechState.set('idle');
         this.showSpeechNotice('Speech recognition network error occurred. You can type your response in the answer box.');
-      } else if (error === 'no-speech') {
-        // Normal silence timeout on mobile; not fatal
       } else if (error === 'aborted') {
         this.isRecognitionActive = false;
+        if (this.speechState() === 'startingRecognition' || this.isMobileDevice()) {
+          this.speechState.set('idle');
+          this.isRecording.set(false);
+        }
+      } else if (error === 'no-speech') {
+        // Natural silence timeout on mobile; will cleanly finish in onend
+      } else {
+        this.stopSpeechRecognition();
+        this.isRecording.set(false);
+        this.speechState.set('idle');
+        this.showSpeechNotice('Voice recognition paused. Tap "Speak Answer" to continue or type your answer.');
       }
     };
 
@@ -686,14 +746,25 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       this.isRecognitionActive = false;
       this.isStartingRecognition.set(false);
 
-      // Safe auto-restart for mobile / intermittent pauses
+      // On Android and mobile devices, NEVER auto-restart in a loop to avoid conflict with Speech Services
+      if (this.isMobileDevice() || this.hadRecognitionError) {
+        this.isRecording.set(false);
+        this.isSpeechPaused.set(false);
+        this.speechState.set('idle');
+        this.recognition = null;
+        return;
+      }
+
+      // On desktop: safe auto-restart for continuous dictation if user hasn't paused or finished
       if (this.isRecording() && !this.isSpeechPaused() && !this.isSynthesizing() && !this.isSubmitting() && !this.isEnding()) {
-        const restartDelay = this.isMobileDevice() ? 300 : 100;
+        const restartDelay = 100;
         this.restartTimeout = setTimeout(() => {
           if (this.isRecording() && !this.isSpeechPaused() && !this.isRecognitionActive && !this.isSynthesizing()) {
             this.safeStartRecognition();
           }
         }, restartDelay);
+      } else {
+        this.speechState.set('idle');
       }
     };
   }
@@ -703,29 +774,60 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     if (!SpeechRecognition) {
       this.showSpeechNotice('Speech-to-text not supported in this browser. Please type your response.');
       this.isRecording.set(false);
+      this.speechState.set('idle');
       return;
     }
 
-    if (!this.recognition) {
-      this.initSpeechRecognition();
-    }
-
-    if (this.isRecognitionActive || this.isStartingRecognition()) {
+    // Guard: Prevent start if submitting, ending, or session processing
+    if (this.isSubmitting() || this.isEnding() || this.speechState() === 'processing') {
+      this.isRecording.set(false);
       return;
     }
 
+    // Guard: Prevent duplicate start calls or start during transition
+    if (this.isRecognitionActive || this.speechState() === 'listening') {
+      return;
+    }
+    if (this.speechState() === 'releasingAudio' || this.speechState() === 'startingRecognition' || this.isStartingRecognition()) {
+      return;
+    }
+
+    // 1. Fully release speech synthesis first
+    this.speechState.set('releasingAudio');
     this.isStartingRecognition.set(true);
-
-    // 1. Fully release speech synthesis first with guard cooldown
     await this.stopSpeechSynthesis();
 
     // Check if recording state was cancelled while waiting for cooldown
-    if (!this.isRecording()) {
+    if (!this.isRecording() || this.isSubmitting() || this.isEnding()) {
       this.isStartingRecognition.set(false);
+      this.speechState.set('idle');
       return;
     }
 
-    // 2. Start recognition with safety checks
+    // 2. Extra event loop tick isolation before starting recognition (crucial for Android Chrome audio HAL)
+    this.speechState.set('startingRecognition');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Guard again
+    if (!this.isRecording() || this.isSubmitting() || this.isEnding()) {
+      this.isStartingRecognition.set(false);
+      this.speechState.set('idle');
+      return;
+    }
+
+    // 3. Ensure a fresh recognition instance on mobile or if previous instance had error
+    if (!this.recognition || this.isMobileDevice() || this.hadRecognitionError) {
+      this.initSpeechRecognition();
+    }
+
+    if (!this.recognition) {
+      this.isStartingRecognition.set(false);
+      this.isRecording.set(false);
+      this.speechState.set('idle');
+      return;
+    }
+
+    // 4. Start recognition safely
     try {
       this.recognition.start();
     } catch (err: any) {
@@ -733,19 +835,24 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       if (err.name === 'InvalidStateError') {
         // Recognition was already active
         this.isRecognitionActive = true;
+        this.speechState.set('listening');
       } else {
         console.warn('SpeechRecognition start failed:', err);
         this.isRecording.set(false);
         this.isRecognitionActive = false;
-        this.showSpeechNotice('Unable to access microphone. Please ensure microphone permissions are allowed.');
+        this.speechState.set('idle');
+        this.hadRecognitionError = true;
+        this.showSpeechNotice('Microphone is busy or being initialized. Please tap "Speak Answer" to try again.');
       }
     }
   }
 
   async toggleRecording() {
+    if (this.isSubmitting() || this.isEnding()) return;
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Speech-to-text not supported in this browser. Please type.');
+      this.showSpeechNotice('Speech-to-text not supported in this browser. Please type.');
       return;
     }
 
@@ -753,6 +860,7 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       this.stopSpeechRecognition();
       this.isRecording.set(false);
       this.isSpeechPaused.set(false);
+      this.speechState.set('idle');
     } else {
       this.isRecording.set(true);
       this.isSpeechPaused.set(false);
@@ -764,6 +872,7 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     this.isSpeechPaused.update(p => !p);
     if (this.isSpeechPaused()) {
       this.stopSpeechRecognition();
+      this.speechState.set('paused');
     } else {
       await this.safeStartRecognition();
     }
@@ -807,11 +916,16 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       try {
         if (this.isRecognitionActive) {
           this.recognition.stop();
+        } else {
+          this.recognition.abort();
         }
       } catch (e) {
         try {
           this.recognition.abort();
         } catch (err) {}
+      }
+      if (this.isMobileDevice()) {
+        this.recognition = null;
       }
     }
     this.isRecognitionActive = false;
@@ -820,6 +934,7 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
   submitAnswer() {
     if (this.isSubmitting()) return;
     this.isSubmitting.set(true);
+    this.speechState.set('processing');
     this.stopSpeechRecognition();
     this.isRecording.set(false);
     this.isSpeechPaused.set(false);
@@ -879,6 +994,7 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
   confirmEndInterview() {
     if (this.isEnding()) return;
     this.isEnding.set(true);
+    this.speechState.set('processing');
     this.stopTimer();
     this.stopSpeechRecognition();
     this.isRecording.set(false);
