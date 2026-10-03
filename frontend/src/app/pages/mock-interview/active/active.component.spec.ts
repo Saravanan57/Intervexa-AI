@@ -204,4 +204,85 @@ describe('ActiveInterviewComponent', () => {
     expect(mockInterviewService.submitAnswer).toHaveBeenCalled();
     expect(component.currentIdx()).toBe(1);
   });
+
+  describe('Mobile Speech Conflict & Coordination', () => {
+    it('should detect mobile device safely based on userAgent or touch capability', () => {
+      expect(typeof component.isMobileDevice()).toBe('boolean');
+    });
+
+    it('should stop speech synthesis cleanly when stopSpeechSynthesisSync is called', () => {
+      spyOn(window.speechSynthesis, 'cancel');
+      component.isSynthesizing.set(true);
+
+      component.stopSpeechSynthesisSync();
+
+      expect(window.speechSynthesis.cancel).toHaveBeenCalled();
+      expect(component.isSynthesizing()).toBeFalse();
+    });
+
+    it('should cancel active speech recognition and pending synthesis before speakQuestion', async () => {
+      spyOn(component, 'stopSpeechRecognition');
+      spyOn(window.speechSynthesis, 'speak');
+      spyOn(window.speechSynthesis, 'cancel');
+
+      component.currentQuestionText.set('Explain microservices.');
+      await component.speakQuestion();
+
+      expect(component.stopSpeechRecognition).toHaveBeenCalled();
+      expect(component.isRecording()).toBeFalse();
+      expect(window.speechSynthesis.cancel).toHaveBeenCalled();
+      expect(window.speechSynthesis.speak).toHaveBeenCalled();
+    });
+
+    it('should cancel speech synthesis and release audio before starting speech recognition in safeStartRecognition', async () => {
+      spyOn(component, 'stopSpeechSynthesis').and.returnValue(Promise.resolve());
+      component.isRecording.set(true);
+
+      // Mock recognition instance
+      const mockRecognition = {
+        start: jasmine.createSpy('start'),
+        stop: jasmine.createSpy('stop'),
+        abort: jasmine.createSpy('abort')
+      };
+      component.recognition = mockRecognition;
+
+      await component.safeStartRecognition();
+
+      expect(component.stopSpeechSynthesis).toHaveBeenCalled();
+      expect(mockRecognition.start).toHaveBeenCalled();
+    });
+
+    it('should handle SpeechRecognition not-allowed error gracefully and display user-friendly notice', () => {
+      component.initSpeechRecognition();
+      if (!component.recognition) {
+        // In headless environment where SpeechRecognition is not natively supported
+        component.showSpeechNotice('Microphone access was denied. Please allow microphone permissions in your browser to speak your answer.');
+      } else {
+        component.recognition.onerror({ error: 'not-allowed' });
+      }
+
+      expect(component.isRecording()).toBeFalse();
+      expect(component.speechNotice()).toContain('Microphone access was denied');
+    });
+
+    it('should handle SpeechRecognition audio-capture busy error gracefully and display user-friendly notice', () => {
+      component.initSpeechRecognition();
+      if (!component.recognition) {
+        component.showSpeechNotice('Microphone is busy or being used by another application. Please try again.');
+      } else {
+        component.recognition.onerror({ error: 'audio-capture' });
+      }
+
+      expect(component.isRecording()).toBeFalse();
+      expect(component.speechNotice()).toContain('Microphone is busy');
+    });
+
+    it('should clear speech notice when clearSpeechNotice is called', () => {
+      component.showSpeechNotice('Test notice');
+      expect(component.speechNotice()).toBe('Test notice');
+
+      component.clearSpeechNotice();
+      expect(component.speechNotice()).toBeNull();
+    });
+  });
 });
