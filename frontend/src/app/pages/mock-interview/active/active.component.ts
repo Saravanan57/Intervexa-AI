@@ -107,7 +107,7 @@ import { InterviewService } from '../../../core/services/interview.service';
             <span class="w-3 h-3 rounded-full bg-error animate-pulse shrink-0"></span>
             <span class="text-xs font-bold text-[#111827] uppercase tracking-wider">Live {{ session()?.type }} ({{ session()?.domain }} - {{ session()?.difficulty }})</span>
           </div>
-          <!-- Predicted score scorecard widget -->
+          <!-- Predicted score, timer & end interview widget -->
           <div class="flex flex-wrap items-center gap-3 sm:gap-6 text-xs shrink-0 font-semibold text-[#4B5563]">
             <div class="flex items-center space-x-2">
               <span class="text-muted font-bold">PREDICTED SCORE:</span>
@@ -116,6 +116,18 @@ import { InterviewService } from '../../../core/services/interview.service';
             <div class="flex items-center space-x-2 border-l border-[#D9E2F1] pl-3 sm:pl-6 font-mono">
               <span class="text-muted font-bold">TIMER:</span>
               <span class="text-[#111827] font-black text-sm">{{ formatTime(secondsElapsed()) }}</span>
+            </div>
+            <div class="border-l border-[#D9E2F1] pl-3 sm:pl-6">
+              <button 
+                type="button"
+                (click)="openEndInterviewConfirm()"
+                [disabled]="isSubmitting() || isEnding()"
+                class="px-4 py-1.5 rounded-full border border-error/30 hover:border-error bg-error/5 hover:bg-error text-error hover:text-white text-xs font-bold transition-all shadow-sm flex items-center space-x-1.5 disabled:opacity-50"
+                title="End interview session now"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                <span>End Interview</span>
+              </button>
             </div>
           </div>
         </div>
@@ -187,84 +199,19 @@ import { InterviewService } from '../../../core/services/interview.service';
               </button>
               <button 
                 (click)="skipQuestion()" 
-                [disabled]="isSubmitting()"
+                [disabled]="isSubmitting() || isEnding()"
                 class="flex items-center space-x-2 py-2.5 px-5 rounded-full bg-white border border-[#D9E2F1] hover:bg-error/5 hover:text-error text-xs font-bold transition-all text-muted disabled:opacity-50 disabled:pointer-events-none"
               >
                 <span>Skip Question ➡</span>
               </button>
-            </div>
-          </div>
-
-          <!-- Right side input scorecard -->
-          <div class="glass p-5 sm:p-8 rounded-2xl sm:rounded-3xl space-y-6 flex flex-col justify-between shadow-sm">
-            <div class="space-y-4">
-              <div class="flex justify-between items-center">
-                <span class="text-[9px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider">Question {{ currentIdx() + 1 }} of {{ totalQuestions() }}</span>
-                <span class="text-[9px] text-muted font-semibold">{{ totalQuestions() - currentIdx() - 1 }} remaining</span>
-              </div>
-              <h3 class="text-lg md:text-xl font-bold leading-relaxed text-[#111827]">
-                {{ currentQuestionText() }}
-              </h3>
-            </div>
-
-            <!-- Visual AI Avatar waveforms -->
-            <div class="flex flex-col items-center justify-center space-y-4 py-8 bg-[#EDF1F5]/40 border border-[#D9E2F1] rounded-2xl relative overflow-hidden shadow-inner">
-              @if (isRecording() && !isSpeechPaused()) {
-                <div class="flex items-end space-x-1.5 h-16">
-                  <div class="wave-bar w-1 bg-primary h-6 rounded-full" style="animation-delay: 0.1s"></div>
-                  <div class="wave-bar w-1 bg-primary/80 h-12 rounded-full" style="animation-delay: 0.2s"></div>
-                  <div class="wave-bar w-1 bg-primary h-14 rounded-full" style="animation-delay: 0.3s"></div>
-                  <div class="wave-bar w-1 bg-primary/80 h-8 rounded-full" style="animation-delay: 0.4s"></div>
-                  <div class="wave-bar w-1 bg-primary h-10 rounded-full" style="animation-delay: 0.5s"></div>
-                </div>
-                <span class="text-[9px] text-primary uppercase tracking-widest font-bold font-mono">Listening and transcribing...</span>
-              } @else if (isSpeechPaused()) {
-                <div class="w-12 h-12 rounded-full bg-white border border-[#D9E2F1] flex items-center justify-center text-muted font-bold text-xs shadow-sm">
-                  ||
-                </div>
-                <span class="text-[9px] text-warning uppercase tracking-widest font-bold font-mono">Speech recording paused</span>
-              } @else {
-                <div class="w-12 h-12 rounded-full bg-white border border-[#D9E2F1] flex items-center justify-center text-muted shadow-sm">
-                  <svg class="w-5 h-5 text-[#6B7280]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
-                </div>
-                <span class="text-[9px] text-muted uppercase tracking-widest font-bold font-mono">Microphone is standby</span>
-              }
-            </div>
-
-            <!-- Voice actions controllers -->
-            <div class="flex flex-wrap items-center gap-3">
-              @if (session()?.type !== 'Coding') {
-                <button 
-                  (click)="toggleRecording()" 
-                  [class.bg-error]="isRecording()"
-                  [class.bg-primary]="!isRecording()"
-                  class="flex items-center space-x-2 py-2.5 px-5 rounded-full text-xs font-bold text-white transition-all hover:scale-[1.02] shadow-md"
-                >
-                  <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
-                  <span>{{ isRecording() ? 'Stop Recording' : 'Speak Answer' }}</span>
-                </button>
-                @if (isRecording()) {
-                  <button 
-                    (click)="togglePauseResume()" 
-                    class="flex items-center space-x-2 py-2.5 px-5 rounded-full bg-white border border-[#D9E2F1] hover:bg-[#EDF1F5] text-xs font-bold text-[#111827] transition-all"
-                  >
-                    <span>{{ isSpeechPaused() ? '▶ Resume' : '⏸ Pause' }}</span>
-                  </button>
-                }
-              }
               <button 
-                (click)="speakQuestion()" 
-                class="flex items-center space-x-2 py-2.5 px-5 rounded-full bg-white border border-[#D9E2F1] hover:bg-[#0145F2]/5 text-xs font-bold transition-all text-[#111827]"
+                type="button"
+                (click)="openEndInterviewConfirm()" 
+                [disabled]="isSubmitting() || isEnding()"
+                class="flex items-center space-x-1.5 py-2.5 px-4 rounded-full bg-white border border-error/30 hover:bg-error hover:text-white text-xs font-bold transition-all text-error disabled:opacity-50 disabled:pointer-events-none shadow-sm"
               >
-                <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
-                <span>Repeat Question</span>
-              </button>
-              <button 
-                (click)="skipQuestion()" 
-                [disabled]="isSubmitting()"
-                class="flex items-center space-x-2 py-2.5 px-5 rounded-full bg-white border border-[#D9E2F1] hover:bg-error/5 hover:text-error text-xs font-bold transition-all text-muted disabled:opacity-50 disabled:pointer-events-none"
-              >
-                <span>Skip Question ➡</span>
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                <span>End Interview</span>
               </button>
             </div>
           </div>
@@ -318,7 +265,7 @@ import { InterviewService } from '../../../core/services/interview.service';
 
               <button 
                 (click)="submitAnswer()" 
-                [disabled]="isSubmitting() || (!textResponse.trim() && !codeResponse.trim())"
+                [disabled]="isSubmitting() || isEnding() || (!textResponse.trim() && !codeResponse.trim())"
                 class="py-3 px-6 rounded-full bg-gradient-primary text-xs font-bold text-white shadow-lg shadow-primary/10 hover:opacity-95 disabled:opacity-50 disabled:pointer-events-none transition-all flex items-center space-x-2"
               >
                 @if (isSubmitting()) {
@@ -331,6 +278,51 @@ import { InterviewService } from '../../../core/services/interview.service';
             </div>
           </div>
         </div>
+
+        <!-- Confirmation Modal for End Interview -->
+        @if (showEndConfirm()) {
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+            <div class="bg-white rounded-2xl sm:rounded-3xl max-w-md w-full p-6 sm:p-8 space-y-5 shadow-2xl border border-[#D9E2F1] text-left">
+              <div class="flex items-center space-x-3 text-error">
+                <div class="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center shrink-0">
+                  <svg class="w-5 h-5 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                </div>
+                <div>
+                  <h4 class="text-base font-bold text-[#111827]">End Interview?</h4>
+                  <p class="text-xs text-muted">Are you sure you want to end the interview?</p>
+                </div>
+              </div>
+              
+              <p class="text-xs text-[#4B5563] leading-relaxed">
+                Your completed answers will be preserved and evaluated using the AI scorecard. You will be taken directly to your feedback and score report.
+              </p>
+
+              <div class="flex justify-end items-center space-x-3 pt-2 border-t border-[#D9E2F1]">
+                <button
+                  type="button"
+                  (click)="cancelEndConfirm()"
+                  [disabled]="isEnding()"
+                  class="px-5 py-2.5 rounded-full border border-[#D9E2F1] hover:bg-[#EDF1F5] text-xs font-bold text-[#111827] transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  (click)="confirmEndInterview()"
+                  [disabled]="isEnding()"
+                  class="px-6 py-2.5 rounded-full bg-error hover:bg-error/90 text-xs font-bold text-white transition-all shadow-md shadow-error/20 flex items-center space-x-2 disabled:opacity-50"
+                >
+                  @if (isEnding()) {
+                    <span class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    <span>Ending Interview...</span>
+                  } @else {
+                    <span>End Interview</span>
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        }
       }
     </div>
   `,
@@ -351,6 +343,8 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
   session = signal<any | null>(null);
   isLoadingSession = signal(true);
   isSubmitting = signal(false);
+  isEnding = signal(false);
+  showEndConfirm = signal(false);
 
   // States
   isCheckingSystem = signal(true);
@@ -674,6 +668,36 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
     }
+  }
+
+  openEndInterviewConfirm() {
+    this.showEndConfirm.set(true);
+  }
+
+  cancelEndConfirm() {
+    this.showEndConfirm.set(false);
+  }
+
+  confirmEndInterview() {
+    if (this.isEnding()) return;
+    this.isEnding.set(true);
+    this.stopTimer();
+    this.stopSpeechRecognition();
+    window.speechSynthesis.cancel();
+
+    this.interviewService.finishSession(this.interviewId).subscribe({
+      next: () => {
+        this.isEnding.set(false);
+        this.showEndConfirm.set(false);
+        this.router.navigate(['/mock-interview/feedback', this.interviewId]);
+      },
+      error: () => {
+        this.isEnding.set(false);
+        this.showEndConfirm.set(false);
+        // Even if finish API encounters a network glitch, navigate to feedback
+        this.router.navigate(['/mock-interview/feedback', this.interviewId]);
+      }
+    });
   }
 
   formatTime(secs: number): string {

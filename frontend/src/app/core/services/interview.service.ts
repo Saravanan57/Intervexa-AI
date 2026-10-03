@@ -32,6 +32,10 @@ export class InterviewService {
     return this.http.post(`${this.apiUrl}/submit-answer`, answer);
   }
 
+  finishSession(interviewId: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/finish`, { interviewId });
+  }
+
   getHistory(): Observable<any> {
     return this.http.get(`${this.apiUrl}/history`);
   }
