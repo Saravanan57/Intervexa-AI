@@ -267,6 +267,7 @@ describe('ActiveInterviewComponent', () => {
         stop: jasmine.createSpy('stop'),
         abort: jasmine.createSpy('abort')
       };
+      spyOn(component, 'createFreshRecognition').and.returnValue(mockRecognition);
       component.recognition = mockRecognition;
 
       await component.safeStartRecognition();
@@ -326,6 +327,7 @@ describe('ActiveInterviewComponent', () => {
         stop: jasmine.createSpy('stop'),
         abort: jasmine.createSpy('abort')
       };
+      spyOn(component, 'createFreshRecognition').and.returnValue(mockRecognition);
       component.recognition = mockRecognition;
       component.isRecording.set(true);
       component.speechState.set('speakingQuestion');
@@ -404,6 +406,59 @@ describe('ActiveInterviewComponent', () => {
 
       component.clearSpeechNotice();
       expect(component.speechNotice()).toBeNull();
+    });
+
+    it('root cause fix: stopSystemCheckStreams should stop both video and audio tracks and close audioContext', () => {
+      const mockTrackStop = jasmine.createSpy('stop');
+      const mockAudioStream = {
+        getTracks: () => [{ stop: mockTrackStop }]
+      } as any;
+      const mockVideoStream = {
+        getTracks: () => [{ stop: mockTrackStop }]
+      } as any;
+      const mockAudioContext = {
+        close: jasmine.createSpy('close')
+      } as any;
+
+      component.audioStream = mockAudioStream;
+      component.videoStream = mockVideoStream;
+      component.audioContext = mockAudioContext;
+
+      component.stopSystemCheckStreams();
+
+      expect(mockTrackStop).toHaveBeenCalledTimes(2);
+      expect(mockAudioContext.close).toHaveBeenCalled();
+      expect(component.audioStream).toBeNull();
+      expect(component.videoStream).toBeNull();
+      expect(component.audioContext).toBeNull();
+    });
+
+    it('root cause fix: startCountdown must release microphone and camera streams immediately', () => {
+      spyOn(component, 'stopSystemCheckStreams');
+
+      component.startCountdown();
+
+      expect(component.stopSystemCheckStreams).toHaveBeenCalled();
+      expect(component.isCheckingSystem()).toBeFalse();
+    });
+
+    it('safeStartRecognition should release lingering system check streams if still active', async () => {
+      spyOn(component, 'stopSystemCheckStreams');
+      spyOn(component, 'stopSpeechSynthesis').and.returnValue(Promise.resolve());
+      component.audioStream = { getTracks: () => [] } as any;
+      component.isRecording.set(true);
+
+      const mockRecognition = {
+        start: jasmine.createSpy('start'),
+        stop: jasmine.createSpy('stop'),
+        abort: jasmine.createSpy('abort')
+      };
+      spyOn(component, 'createFreshRecognition').and.returnValue(mockRecognition);
+
+      await component.safeStartRecognition();
+
+      expect(component.stopSystemCheckStreams).toHaveBeenCalled();
+      expect(mockRecognition.start).toHaveBeenCalled();
     });
   });
 });

@@ -8,9 +8,12 @@ export type SpeechState =
   | 'idle'
   | 'speakingQuestion'
   | 'releasingAudio'
+  | 'readyToListen'
   | 'startingRecognition'
   | 'listening'
   | 'paused'
+  | 'submitting'
+  | 'ending'
   | 'processing';
 
 @Component({
@@ -426,11 +429,25 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     this.interviewService.closeSocket();
     this.stopSpeechSynthesisSync();
     this.speechState.set('idle');
-    
-    // Stop local video and audio streams
-    if (this.audioStream) this.audioStream.getTracks().forEach(t => t.stop());
-    if (this.videoStream) this.videoStream.getTracks().forEach(t => t.stop());
-    if (this.audioContext) this.audioContext.close();
+    this.stopSystemCheckStreams();
+  }
+
+  stopSystemCheckStreams() {
+    if (this.videoStream) {
+      this.videoStream.getTracks().forEach(t => t.stop());
+      this.videoStream = null;
+      this.hasCameraPermission.set(false);
+    }
+    if (this.audioStream) {
+      this.audioStream.getTracks().forEach(t => t.stop());
+      this.audioStream = null;
+    }
+    if (this.audioContext) {
+      try {
+        this.audioContext.close();
+      } catch (e) {}
+      this.audioContext = null;
+    }
   }
 
   runSystemChecks() {
@@ -448,12 +465,13 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       const dataArray = new Uint8Array(bufferLength);
       
       const updateVolume = () => {
+        if (!this.isCheckingSystem() || !this.audioStream) return;
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
         for(let i=0; i<bufferLength; i++) sum += dataArray[i];
         const average = sum / bufferLength;
         this.micVolume.set(Math.min(100, Math.round(average * 2))); // Amplify visual
-        if (this.isCheckingSystem()) {
+        if (this.isCheckingSystem() && this.audioStream) {
           requestAnimationFrame(updateVolume);
         }
       };
@@ -488,17 +506,19 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     gain.gain.setValueAtTime(0.1, context.currentTime);
     osc.start();
     osc.stop(context.currentTime + 0.5);
+    setTimeout(() => {
+      try {
+        context.close();
+      } catch (e) {}
+    }, 600);
   }
 
   startCountdown() {
     this.isCheckingSystem.set(false);
     this.countdownNumber.set(3);
 
-    // Stop checking streams to clean up context
-    if (this.videoStream) {
-      this.videoStream.getTracks().forEach(t => t.stop());
-      this.hasCameraPermission.set(false);
-    }
+    // Completely stop and release system check audio & video streams so microphone is completely free
+    this.stopSystemCheckStreams();
 
     const interval = setInterval(() => {
       this.countdownNumber.update(n => n - 1);
@@ -570,6 +590,29 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     this.speechNotice.set(null);
   }
 
+  private logSpeechDiagnostic(action: string, extra: Record<string, any> = {}) {
+    const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
+    const diagnostic = {
+      action,
+      timestamp: new Date().toISOString(),
+      speechState: this.speechState(),
+      isMobile: this.isMobileDevice(),
+      isAndroid: this.isAndroid(),
+      isRecording: this.isRecording(),
+      isRecognitionActive: this.isRecognitionActive,
+      isStartingRecognition: this.isStartingRecognition(),
+      hasActiveAudioStream: !!(this.audioStream && this.audioStream.active),
+      audioStreamTracks: this.audioStream ? this.audioStream.getTracks().map(t => ({ kind: t.kind, readyState: t.readyState })) : [],
+      tts: synth ? {
+        speaking: synth.speaking,
+        pending: synth.pending,
+        paused: synth.paused
+      } : 'not-supported',
+      ...extra
+    };
+    console.debug(`[SPEECH DIAGNOSTIC] ${action}:`, diagnostic);
+  }
+
   stopSpeechSynthesisSync() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
@@ -580,6 +623,7 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     if (this.speechState() === 'speakingQuestion') {
       this.speechState.set('idle');
     }
+    this.logSpeechDiagnostic('stopSpeechSynthesisSync');
   }
 
   async stopSpeechSynthesis(): Promise<void> {
@@ -587,6 +631,14 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     // On mobile devices, especially Android, Google Speech Services / AudioTrack requires a cooldown to release the audio subsystem
     const cooldownMs = this.getAudioSettlingDelay();
     await new Promise(resolve => setTimeout(resolve, cooldownMs));
+
+    // Double check if speechSynthesis still reports speaking on Android
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis.speaking) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {}
+    }
+    this.logSpeechDiagnostic('stopSpeechSynthesis_completed');
   }
 
   loadQuestion() {
@@ -662,23 +714,27 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
     }
   }
 
-  initSpeechRecognition() {
+  createFreshRecognition(): any {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+    if (!SpeechRecognition) return null;
 
     if (this.recognition) {
       try {
+        this.recognition.onstart = null;
+        this.recognition.onresult = null;
+        this.recognition.onerror = null;
+        this.recognition.onend = null;
         this.recognition.abort();
       } catch (e) {}
       this.recognition = null;
     }
 
-    this.recognition = new SpeechRecognition();
-    this.recognition.continuous = !this.isMobileDevice();
-    this.recognition.interimResults = true;
-    this.recognition.lang = 'en-US';
+    const rec = new SpeechRecognition();
+    rec.continuous = !this.isMobileDevice();
+    rec.interimResults = true;
+    rec.lang = 'en-US';
 
-    this.recognition.onstart = () => {
+    rec.onstart = () => {
       this.isRecognitionActive = true;
       this.isStartingRecognition.set(false);
       this.isRecording.set(true);
@@ -686,9 +742,10 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       this.speechState.set('listening');
       this.hadRecognitionError = false;
       this.clearSpeechNotice();
+      this.logSpeechDiagnostic('recognition_onstart');
     };
 
-    this.recognition.onresult = (event: any) => {
+    rec.onresult = (event: any) => {
       if (this.isSpeechPaused()) return;
 
       let finalTranscript = '';
@@ -705,11 +762,11 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       }
     };
 
-    this.recognition.onerror = (event: any) => {
+    rec.onerror = (event: any) => {
       this.isStartingRecognition.set(false);
       const error = event?.error;
-      console.warn('[SPEECH RECOGNITION ERROR]:', error);
       this.hadRecognitionError = true;
+      this.logSpeechDiagnostic('recognition_onerror', { error });
 
       if (error === 'not-allowed' || error === 'service-not-allowed') {
         this.stopSpeechRecognition();
@@ -725,7 +782,7 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
         this.stopSpeechRecognition();
         this.isRecording.set(false);
         this.speechState.set('idle');
-        this.showSpeechNotice('Speech recognition network error occurred. You can type your response in the answer box.');
+        this.showSpeechNotice('Speech recognition network error occurred. You can continue typing your response in the answer box.');
       } else if (error === 'aborted') {
         this.isRecognitionActive = false;
         if (this.speechState() === 'startingRecognition' || this.isMobileDevice()) {
@@ -742,9 +799,10 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       }
     };
 
-    this.recognition.onend = () => {
+    rec.onend = () => {
       this.isRecognitionActive = false;
       this.isStartingRecognition.set(false);
+      this.logSpeechDiagnostic('recognition_onend');
 
       // On Android and mobile devices, NEVER auto-restart in a loop to avoid conflict with Speech Services
       if (this.isMobileDevice() || this.hadRecognitionError) {
@@ -767,9 +825,17 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
         this.speechState.set('idle');
       }
     };
+
+    return rec;
+  }
+
+  initSpeechRecognition() {
+    this.recognition = this.createFreshRecognition();
   }
 
   async safeStartRecognition(): Promise<void> {
+    this.logSpeechDiagnostic('safeStartRecognition_invoked');
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       this.showSpeechNotice('Speech-to-text not supported in this browser. Please type your response.');
@@ -778,8 +844,14 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Critical: Ensure no system check audio streams are lingering and holding the microphone
+    if (this.audioStream || this.audioContext) {
+      this.stopSystemCheckStreams();
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
     // Guard: Prevent start if submitting, ending, or session processing
-    if (this.isSubmitting() || this.isEnding() || this.speechState() === 'processing') {
+    if (this.isSubmitting() || this.isEnding() || this.speechState() === 'processing' || this.speechState() === 'submitting' || this.speechState() === 'ending') {
       this.isRecording.set(false);
       return;
     }
@@ -804,6 +876,8 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       return;
     }
 
+    this.speechState.set('readyToListen');
+
     // 2. Extra event loop tick isolation before starting recognition (crucial for Android Chrome audio HAL)
     this.speechState.set('startingRecognition');
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -815,9 +889,10 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // 3. Ensure a fresh recognition instance on mobile or if previous instance had error
-    if (!this.recognition || this.isMobileDevice() || this.hadRecognitionError) {
-      this.initSpeechRecognition();
+    // 3. For mobile / Android, create a clean fresh SpeechRecognition instance
+    const fresh = this.createFreshRecognition();
+    if (fresh) {
+      this.recognition = fresh;
     }
 
     if (!this.recognition) {
@@ -829,9 +904,11 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
 
     // 4. Start recognition safely
     try {
+      this.logSpeechDiagnostic('calling_recognition_start');
       this.recognition.start();
     } catch (err: any) {
       this.isStartingRecognition.set(false);
+      this.logSpeechDiagnostic('recognition_start_exception', { errorName: err?.name, errorMessage: err?.message });
       if (err.name === 'InvalidStateError') {
         // Recognition was already active
         this.isRecognitionActive = true;
@@ -934,7 +1011,7 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
   submitAnswer() {
     if (this.isSubmitting()) return;
     this.isSubmitting.set(true);
-    this.speechState.set('processing');
+    this.speechState.set('submitting');
     this.stopSpeechRecognition();
     this.isRecording.set(false);
     this.isSpeechPaused.set(false);
@@ -994,7 +1071,7 @@ export class ActiveInterviewComponent implements OnInit, OnDestroy {
   confirmEndInterview() {
     if (this.isEnding()) return;
     this.isEnding.set(true);
-    this.speechState.set('processing');
+    this.speechState.set('ending');
     this.stopTimer();
     this.stopSpeechRecognition();
     this.isRecording.set(false);
