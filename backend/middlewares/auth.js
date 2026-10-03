@@ -11,6 +11,8 @@ const protect = async (req, res, next) => {
     if (parts.length >= 2) {
       token = parts[1];
     }
+  } else if (req.query && req.query.token) {
+    token = req.query.token;
   }
 
   if (!token) {

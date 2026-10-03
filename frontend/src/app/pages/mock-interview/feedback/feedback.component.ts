@@ -25,9 +25,14 @@ import { InterviewService } from '../../../core/services/interview.service';
           <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 z-10 w-full md:w-auto shrink-0">
             <button 
               (click)="downloadReport()" 
-              class="text-xs font-bold py-3 px-6 rounded-full border border-[#D9E2F1] bg-white hover:bg-[#0145F2]/5 text-[#111827] transition-all shadow-sm text-center w-full sm:w-auto"
+              [disabled]="isDownloading()"
+              class="text-xs font-bold py-3 px-6 rounded-full border border-[#D9E2F1] bg-white hover:bg-[#0145F2]/5 text-[#111827] transition-all shadow-sm text-center w-full sm:w-auto disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              📥 Download Report
+              @if (isDownloading()) {
+                ⏳ Downloading...
+              } @else {
+                📥 Download Report
+              }
             </button>
             <a 
               routerLink="/dashboard" 
@@ -190,6 +195,7 @@ export class FeedbackComponent implements OnInit {
   feedback = signal<any | null>(null);
   report = signal<any | null>(null);
   isLoading = signal(true);
+  isDownloading = signal(false);
 
   ngOnInit() {
     this.route.params.subscribe(params => {
@@ -219,7 +225,27 @@ export class FeedbackComponent implements OnInit {
   }
 
   downloadReport() {
-    const url = this.interviewService.getReportDownloadUrl(this.interviewId);
-    window.open(url, '_blank');
+    if (!this.interviewId || this.isDownloading()) {
+      return;
+    }
+
+    this.isDownloading.set(true);
+    this.interviewService.downloadReport(this.interviewId).subscribe({
+      next: (blob: Blob) => {
+        this.isDownloading.set(false);
+        const blobUrl = window.URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = blobUrl;
+        anchor.download = `interview-report-${this.interviewId}.html`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        window.URL.revokeObjectURL(blobUrl);
+      },
+      error: (err) => {
+        this.isDownloading.set(false);
+        alert(err.message || 'Failed to download report.');
+      }
+    });
   }
 }

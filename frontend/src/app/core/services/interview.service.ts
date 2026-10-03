@@ -48,6 +48,12 @@ export class InterviewService {
     return `${this.apiUrl}/${id}/download`;
   }
 
+  downloadReport(id: string): Observable<Blob> {
+    return this.http.get(`${this.apiUrl}/${id}/download`, {
+      responseType: 'blob'
+    });
+  }
+
   // Socket Connection Management
   initSocket(interviewId: string) {
     this.closeSocket();

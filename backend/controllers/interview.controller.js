@@ -2,6 +2,7 @@ const Interview = require('../models/Interview');
 const Feedback = require('../models/Feedback');
 const Report = require('../models/Report');
 const User = require('../models/User');
+const Resume = require('../models/Resume');
 const Notification = require('../models/Notification');
 const ActivityLog = require('../models/ActivityLog');
 const aiService = require('../services/ai.service');
@@ -371,8 +372,8 @@ exports.downloadReportHtml = async (req, res, next) => {
     const confScore = feedback ? feedback.confidenceScore : 85;
     const leadScore = feedback ? feedback.leadershipScore : 80;
 
-    res.setHeader('Content-Type', 'text/html');
-    res.setHeader('Content-Disposition', `attachment; filename=Intervexa-AI-Report-${interview._id}.html`);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="interview-report-${interview._id}.html"`);
 
     res.send(`
       <!DOCTYPE html>
@@ -402,6 +403,10 @@ exports.downloadReportHtml = async (req, res, next) => {
           ul { padding-left: 20px; margin: 0; }
           li { margin-bottom: 6px; font-size: 13px; color: #4B5563; }
           .btn-print { background: #06B6D4; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; margin-bottom: 20px; }
+          @media print {
+            .btn-print { display: none !important; }
+            body { margin: 20px; background-color: white; }
+          }
         </style>
       </head>
       <body>
